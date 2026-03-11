@@ -1,0 +1,118 @@
+/**
+ * news.ts
+ * News and sentiment as a SECONDARY context layer.
+ *
+ * Rules:
+ * - News does not generate core signals
+ * - News may adjust display context / caution text
+ * - XAU and BTC news are handled separately
+ * - Sentiment values are deterministic (no random)
+ */
+
+import type { NewsItem, Symbol } from "../types";
+
+const XAU_NEWS: NewsItem[] = [
+  {
+    id: "xau-1",
+    source: "Reuters",
+    publishedAt: "2 giờ trước",
+    title: "Vàng tăng mạnh nhờ lo ngại địa chính trị",
+    summary:
+      "Giá vàng giao ngay tiến gần mốc $3,150/oz khi căng thẳng ở Trung Đông leo thang, nhà đầu tư chuyển sang tài sản trú ẩn an toàn.",
+    relatedCoins: ["XAU", "USD"],
+    sentimentLabel: "bullish",
+    sentimentScore: 72,
+    hasTargetPrice: true,
+  },
+  {
+    id: "xau-2",
+    source: "Bloomberg",
+    publishedAt: "4 giờ trước",
+    title: "Fed giữ lãi suất, USD suy yếu hỗ trợ vàng",
+    summary:
+      "Cục Dự trữ Liên bang giữ nguyên lãi suất, đồng USD giảm nhẹ, tạo điều kiện thuận lợi cho vàng duy trì đà tăng trong ngắn hạn.",
+    relatedCoins: ["XAU", "USD", "DXY"],
+    sentimentLabel: "bullish",
+    sentimentScore: 65,
+    hasTargetPrice: false,
+  },
+  {
+    id: "xau-3",
+    source: "Kitco News",
+    publishedAt: "6 giờ trước",
+    title: "Kỹ thuật vàng: Ngưỡng kháng cự quan trọng tại $3,200",
+    summary:
+      "Phân tích kỹ thuật cho thấy vàng đang tiếp cận vùng kháng cự $3,200. Cần break rõ ràng để xác nhận xu hướng tăng tiếp theo.",
+    relatedCoins: ["XAU"],
+    sentimentLabel: "neutral",
+    sentimentScore: 50,
+    hasTargetPrice: true,
+  },
+  {
+    id: "xau-4",
+    source: "FXStreet",
+    publishedAt: "8 giờ trước",
+    title: "Nhu cầu vàng từ ngân hàng trung ương tiếp tục tăng",
+    summary:
+      "Các ngân hàng trung ương trên thế giới tiếp tục mua vàng để đa dạng hóa dự trữ, hỗ trợ nhu cầu cơ bản cho kim loại quý này.",
+    relatedCoins: ["XAU"],
+    sentimentLabel: "bullish",
+    sentimentScore: 68,
+    hasTargetPrice: false,
+  },
+];
+
+const BTC_NEWS: NewsItem[] = [
+  {
+    id: "btc-1",
+    source: "CoinDesk",
+    publishedAt: "1 giờ trước",
+    title: "Bitcoin consolidates near $84K as ETF inflows continue",
+    summary:
+      "Bitcoin duy trì vùng $84,000 với dòng tiền ETF vẫn tích cực. Các nhà phân tích kỳ vọng BTC sẽ tái kiểm tra $90,000 trong tuần tới.",
+    relatedCoins: ["BTC", "ETH"],
+    sentimentLabel: "bullish",
+    sentimentScore: 70,
+    hasTargetPrice: true,
+  },
+  {
+    id: "btc-2",
+    source: "The Block",
+    publishedAt: "3 giờ trước",
+    title: "Whale accumulation detected at $82K support",
+    summary:
+      "On-chain data cho thấy các địa chỉ lớn (whale) đang tích lũy BTC mạnh tại vùng $82,000-$83,000, tín hiệu tích cực cho xu hướng trung hạn.",
+    relatedCoins: ["BTC"],
+    sentimentLabel: "bullish",
+    sentimentScore: 75,
+    hasTargetPrice: false,
+  },
+  {
+    id: "btc-3",
+    source: "Cointelegraph",
+    publishedAt: "5 giờ trước",
+    title: "BTC miners selling pressure eases after halving",
+    summary:
+      "Áp lực bán từ thợ đào Bitcoin giảm dần sau halving, điều này lịch sử cho thấy thường trùng với giai đoạn tăng giá trung hạn.",
+    relatedCoins: ["BTC"],
+    sentimentLabel: "neutral",
+    sentimentScore: 55,
+    hasTargetPrice: false,
+  },
+  {
+    id: "btc-4",
+    source: "Decrypt",
+    publishedAt: "7 giờ trước",
+    title: "Macro outlook: Rate cuts to benefit risk assets including BTC",
+    summary:
+      "Triển vọng cắt giảm lãi suất của Fed trong Q3 được kỳ vọng sẽ hỗ trợ các tài sản rủi ro bao gồm Bitcoin trong nửa cuối năm.",
+    relatedCoins: ["BTC", "ETH", "SOL"],
+    sentimentLabel: "bullish",
+    sentimentScore: 62,
+    hasTargetPrice: true,
+  },
+];
+
+export function getNews(symbol: Symbol): NewsItem[] {
+  return symbol === "XAU/USDT" ? XAU_NEWS : BTC_NEWS;
+}
