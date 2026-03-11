@@ -58,7 +58,7 @@ export default function MainChart({ candles, scenario }: Props) {
           viewBox={`0 0 ${totalW} ${CHART_HEIGHT}`}
           width="100%"
           height={CHART_HEIGHT}
-          style={{ display: "block" }}
+          style={{ display: "block", pointerEvents: "none" }}
           xmlns="http://www.w3.org/2000/svg"
         >
           {/* Background */}

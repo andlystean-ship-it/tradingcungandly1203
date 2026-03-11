@@ -319,7 +319,7 @@ html, body, #root {
   height: 260px;
   min-height: 260px;
   background: var(--bg);
-  overflow: visible;
+  overflow: hidden;
 }
 
 #tv-chart {
@@ -400,18 +400,26 @@ html, body, #root {
 
 /* ── CHART TABS ── */
 .chart-tabs {
-  display: flex;
-  border-bottom: 1px solid var(--border-dim);
+  display: block;
   background: var(--bg-panel);
+  border-bottom: 1px solid var(--border-dim);
   overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
   scrollbar-width: none;
+  min-height: 36px;
+  line-height: 36px;
 }
 
 .chart-tabs::-webkit-scrollbar { display: none; }
 
 .chart-tab {
+  display: inline-block;
   flex-shrink: 0;
-  padding: 8px 12px;
+  padding: 0 14px;
+  height: 36px;
+  line-height: 36px;
+  vertical-align: top;
   font-size: 11px;
   font-weight: 500;
   color: var(--text-muted);
@@ -426,7 +434,7 @@ html, body, #root {
 
 .chart-tab.active {
   color: var(--neon-cyan);
-  border-bottom-color: var(--neon-cyan);
+  box-shadow: inset 0 -2px 0 var(--neon-cyan);
   text-shadow: 0 0 8px #00ffe766;
 }
 
