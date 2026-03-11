@@ -106,6 +106,7 @@ export type EngineOutput = {
   symbol: Symbol;
   currentPrice: number;
   lastUpdated: string;
+  chartCandles: CandleData[]; // 1H candles used for chart rendering
   marketBias: MarketBias;
   timeframeSignals: TimeframeSignal[];
   trendlines: Trendline[];
