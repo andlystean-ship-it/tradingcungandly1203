@@ -75,6 +75,7 @@ function runPipeline(
     currentPrice,
     lastUpdated: now,
     chartCandles,
+    candleMap,
     marketBias,
     timeframeSignals,
     trendlines,

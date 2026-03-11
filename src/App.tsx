@@ -52,7 +52,7 @@ export default function App() {
       />
       <BiasBar bias={engine.marketBias} />
       <TimeframeStrip signals={engine.timeframeSignals} />
-      <MainChart candles={engine.chartCandles} scenario={engine.marketScenario} />
+      <MainChart candleMap={engine.candleMap} scenario={engine.marketScenario} />
       <ChartTabs scenario={engine.marketScenario} />
       <NewsPanel news={news} symbol={symbol} />
     </div>

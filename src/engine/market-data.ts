@@ -30,8 +30,18 @@ const FETCH_TIMEOUT_MS = 8000;
 
 // ── Symbol → Binance pair ─────────────────────────────────────────────────────
 const BINANCE_SYMBOL: Record<Symbol, string> = {
-  "XAU/USDT": "XAUUSDT",
+  "XAU/USDT": "PAXGUSDT",
   "BTC/USDT": "BTCUSDT",
+  "ETH/USDT": "ETHUSDT",
+  "SOL/USDT": "SOLUSDT",
+  "BNB/USDT": "BNBUSDT",
+  "XRP/USDT": "XRPUSDT",
+  "ADA/USDT": "ADAUSDT",
+  "DOGE/USDT": "DOGEUSDT",
+  "DOT/USDT": "DOTUSDT",
+  "AVAX/USDT": "AVAXUSDT",
+  "LINK/USDT": "LINKUSDT",
+  "SUI/USDT": "SUIUSDT",
 };
 
 // ── Timeframe → Binance interval ──────────────────────────────────────────────

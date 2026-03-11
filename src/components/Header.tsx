@@ -33,6 +33,16 @@ export default function Header({
         >
           <option value="XAU/USDT">XAU/USDT - Vàng</option>
           <option value="BTC/USDT">BTC/USDT - Bitcoin</option>
+          <option value="ETH/USDT">ETH/USDT - Ethereum</option>
+          <option value="SOL/USDT">SOL/USDT - Solana</option>
+          <option value="BNB/USDT">BNB/USDT - BNB</option>
+          <option value="XRP/USDT">XRP/USDT - Ripple</option>
+          <option value="ADA/USDT">ADA/USDT - Cardano</option>
+          <option value="DOGE/USDT">DOGE/USDT - Dogecoin</option>
+          <option value="DOT/USDT">DOT/USDT - Polkadot</option>
+          <option value="AVAX/USDT">AVAX/USDT - Avalanche</option>
+          <option value="LINK/USDT">LINK/USDT - Chainlink</option>
+          <option value="SUI/USDT">SUI/USDT - Sui</option>
         </select>
       </div>
     </div>

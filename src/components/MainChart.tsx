@@ -1,268 +1,227 @@
-import type { CandleData, MarketScenario } from "../types";
+import { useEffect, useRef, useState, useCallback } from "react";
+import {
+  createChart,
+  ColorType,
+  LineStyle,
+  CrosshairMode,
+  type IChartApi,
+  type ISeriesApi,
+  type IPriceLine,
+} from "lightweight-charts";
+import type { CandleData, MarketScenario, Trendline, Timeframe } from "../types";
+
+type CandleMap = Record<Timeframe, CandleData[]>;
 
 type Props = {
-  candles: CandleData[];
+  candleMap: CandleMap;
   scenario: MarketScenario;
 };
 
-// ── Layout ────────────────────────────────────────────────────────────────────
-const CHART_H = 320;
-const PRICE_AXIS_W = 70;
-const PAD_TOP = 14;
-const PAD_BOTTOM = 26;
-const TOTAL_W = 390;
-
-// ── TradingView-style palette ─────────────────────────────────────────────────
-const TV_BG        = "#0a130e";
-const TV_BG_AXIS   = "#0d1a10";
-const TV_GRID_H    = "rgba(28,78,36,0.55)";
-const TV_GRID_V    = "rgba(28,78,36,0.35)";
-const TV_BORDER    = "#1e4025";
-const TV_AXIS_TXT  = "#5a9a6a";
-const TV_TIME_TXT  = "#3a7a4a";
-const TV_WATERMARK = "rgba(35,110,45,0.06)";
+const TIMEFRAMES: Timeframe[] = ["15M", "1H", "2H", "4H", "6H", "8H", "12H", "1D"];
 
 const UP_COLOR = "#26a69a";
 const DN_COLOR = "#ef5350";
 
-// ── Helper: nice round step for grid ─────────────────────────────────────────
-function niceStep(raw: number): number {
-  const exp = Math.floor(Math.log10(raw));
-  const frac = raw / Math.pow(10, exp);
-  const nice = frac < 1.5 ? 1 : frac < 3 ? 2 : frac < 7 ? 5 : 10;
-  return nice * Math.pow(10, exp);
+/** Extrapolate trendline to a target candle index */
+function extrapolatePrice(t: Trendline, targetIdx: number): number {
+  if (t.x2 === t.x1) return t.y1;
+  return t.y1 + ((t.y2 - t.y1) / (t.x2 - t.x1)) * (targetIdx - t.x1);
 }
 
-export default function MainChart({ candles, scenario }: Props) {
-  const visible = candles.slice(-60);
+export default function MainChart({ candleMap, scenario }: Props) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const priceLinesRef = useRef<IPriceLine[]>([]);
+  const trendlineSeriesRef = useRef<ISeriesApi<"Line">[]>([]);
+  const [selectedTf, setSelectedTf] = useState<Timeframe>("1H");
 
-  const { targetPrice, pendingLong, pendingShort, pivot, currentPrice } = scenario;
+  // ── Create chart once ────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!containerRef.current) return;
 
-  // Price range with small margin so levels are never clipped
-  const allP = visible.flatMap((c) => [c.high, c.low]);
-  allP.push(targetPrice, pendingLong, pendingShort, pivot, currentPrice);
-  const rawMin = Math.min(...allP);
-  const rawMax = Math.max(...allP);
-  const margin = (rawMax - rawMin) * 0.04;
-  const priceMin = rawMin - margin;
-  const priceMax = rawMax + margin;
-  const priceRange = priceMax - priceMin || 1;
+    const chart = createChart(containerRef.current, {
+      layout: {
+        background: { type: ColorType.Solid, color: "#0a130e" },
+        textColor: "#5a9a6a",
+        fontFamily: "'SF Mono', 'Fira Code', monospace",
+      },
+      grid: {
+        vertLines: { color: "rgba(28,78,36,0.35)" },
+        horzLines: { color: "rgba(28,78,36,0.55)" },
+      },
+      width: containerRef.current.clientWidth,
+      height: 420,
+      crosshair: {
+        mode: CrosshairMode.Normal,
+        vertLine: { color: "rgba(0,229,255,0.3)", labelBackgroundColor: "#1e4025" },
+        horzLine: { color: "rgba(0,229,255,0.3)", labelBackgroundColor: "#1e4025" },
+      },
+      rightPriceScale: {
+        borderColor: "#1e4025",
+        scaleMargins: { top: 0.05, bottom: 0.05 },
+      },
+      timeScale: {
+        borderColor: "#1e4025",
+        timeVisible: true,
+        secondsVisible: false,
+      },
+      watermark: {
+        visible: true,
+        text: "Crypto and Forex Trading",
+        color: "rgba(35,110,45,0.08)",
+        fontSize: 24,
+      },
+    });
 
-  const drawH  = CHART_H - PAD_TOP - PAD_BOTTOM;
-  const chartW = TOTAL_W - PRICE_AXIS_W;
+    const series = chart.addCandlestickSeries({
+      upColor: UP_COLOR,
+      downColor: DN_COLOR,
+      borderDownColor: DN_COLOR,
+      borderUpColor: UP_COLOR,
+      wickDownColor: DN_COLOR,
+      wickUpColor: UP_COLOR,
+    });
 
-  const py = (price: number) =>
-    PAD_TOP + drawH - ((price - priceMin) / priceRange) * drawH;
+    chartRef.current = chart;
+    seriesRef.current = series;
 
-  const slotW    = chartW / (visible.length || 60);
-  const bodyW    = Math.max(2, slotW * 0.65);
-  const cx       = (i: number) => i * slotW + slotW / 2;
-  const offset   = candles.length - visible.length;
+    const ro = new ResizeObserver(() => {
+      if (containerRef.current) {
+        chart.applyOptions({ width: containerRef.current.clientWidth });
+      }
+    });
+    ro.observe(containerRef.current);
 
-  // Grid prices
-  const step = niceStep(priceRange / 6);
-  const gridStart = Math.ceil(priceMin / step) * step;
-  const gridPrices: number[] = [];
-  for (let p = gridStart; p <= priceMax + step * 0.1; p += step) {
-    if (p >= priceMin && p <= priceMax) gridPrices.push(p);
-  }
+    return () => {
+      ro.disconnect();
+      chart.remove();
+      chartRef.current = null;
+      seriesRef.current = null;
+      priceLinesRef.current = [];
+      trendlineSeriesRef.current = [];
+    };
+  }, []);
 
-  const fmt = (n: number) => n.toFixed(2);
+  // ── Update candle data, price lines & trendlines ────────────────────────────
+  const updateChart = useCallback(() => {
+    const chart = chartRef.current;
+    const series = seriesRef.current;
+    if (!series || !chart) return;
 
-  // Active trendlines
-  const trendlines = scenario.trendlines.filter((t) => t.active).slice(0, 5);
+    const candles = candleMap[selectedTf] || [];
+    const data = candles.map((c) => ({
+      time: c.time as number,
+      open: c.open,
+      high: c.high,
+      low: c.low,
+      close: c.close,
+    }));
+    series.setData(data);
 
-  // Time axis sample indices
-  const N = visible.length;
-  const timeIdxs = [0, Math.round(N * 0.25), Math.round(N * 0.5), Math.round(N * 0.75), N - 1]
-    .filter((i) => i >= 0 && i < N);
+    // ── Remove old price lines ─────────────────────────────────────
+    for (const pl of priceLinesRef.current) {
+      series.removePriceLine(pl);
+    }
+    priceLinesRef.current = [];
+
+    // ── Remove old trendline series ────────────────────────────────
+    for (const ts of trendlineSeriesRef.current) {
+      chart.removeSeries(ts);
+    }
+    trendlineSeriesRef.current = [];
+
+    // ── Add level price lines ──────────────────────────────────────
+    const levels: { price: number; color: string; title: string; style: LineStyle }[] = [
+      { price: scenario.pendingLong, color: UP_COLOR, title: "Lệnh Chờ Long", style: LineStyle.Solid },
+      { price: scenario.pendingShort, color: DN_COLOR, title: "Lệnh Chờ Short", style: LineStyle.Solid },
+      { price: scenario.targetPrice, color: "#ffd600", title: "Target", style: LineStyle.Solid },
+      { price: scenario.pivot, color: "#00e5ff", title: "Pivot", style: LineStyle.Dashed },
+      { price: scenario.invalidationLevel, color: "#ff6d00", title: "Invalidation", style: LineStyle.Dotted },
+      { price: scenario.r1, color: "rgba(239,83,80,0.5)", title: "R1", style: LineStyle.Dotted },
+      { price: scenario.s1, color: "rgba(38,166,154,0.5)", title: "S1", style: LineStyle.Dotted },
+    ];
+
+    for (const lv of levels) {
+      if (lv.price > 0) {
+        const pl = series.createPriceLine({
+          price: lv.price,
+          color: lv.color,
+          lineWidth: lv.title === "Pivot" || lv.title === "Target" ? 2 : 1,
+          lineStyle: lv.style,
+          axisLabelVisible: true,
+          title: lv.title,
+        });
+        priceLinesRef.current.push(pl);
+      }
+    }
+
+    // ── Draw trendlines ────────────────────────────────────────────
+    const activeTrendlines = scenario.trendlines.filter((t) => t.active);
+    for (const t of activeTrendlines.slice(0, 5)) {
+      // Extrapolate trendline from x1 to end of visible candles
+      const startIdx = Math.max(0, t.x1);
+      const endIdx = Math.min(candles.length - 1, t.x2 + Math.round((t.x2 - t.x1) * 0.5));
+
+      if (startIdx >= candles.length || endIdx < 0) continue;
+
+      const lineColor = t.kind === "ascending" ? "#26a69a" : "#ef5350";
+      const lineData: { time: number; value: number }[] = [];
+
+      // Sample points along the trendline
+      for (let idx = startIdx; idx <= endIdx && idx < candles.length; idx++) {
+        const price = extrapolatePrice(t, idx);
+        lineData.push({ time: candles[idx].time, value: +price.toFixed(4) });
+      }
+
+      if (lineData.length >= 2) {
+        const lineSeries = chart.addLineSeries({
+          color: lineColor,
+          lineWidth: 2,
+          lineStyle: t.broken ? LineStyle.Dashed : LineStyle.Solid,
+          crosshairMarkerVisible: false,
+          lastValueVisible: false,
+          priceLineVisible: false,
+        });
+        lineSeries.setData(lineData);
+        trendlineSeriesRef.current.push(lineSeries);
+      }
+    }
+
+    chart.timeScale().fitContent();
+  }, [candleMap, selectedTf, scenario]);
+
+  useEffect(() => {
+    updateChart();
+  }, [updateChart]);
 
   return (
     <div className="chart-section">
-      <div className="chart-container">
-        <svg
-          viewBox={`0 0 ${TOTAL_W} ${CHART_H}`}
-          width="100%"
-          height={CHART_H}
-          style={{ display: "block", pointerEvents: "none" }}
-          xmlns="http://www.w3.org/2000/svg"
-        >
-          {/* ── Background ─────────────────────────────────────────────── */}
-          <rect width={TOTAL_W} height={CHART_H} fill={TV_BG} />
+      {/* ── Timeframe selector ──────────────────────────────────────── */}
+      <div className="chart-tf-selector">
+        {TIMEFRAMES.map((tf) => (
+          <button
+            key={tf}
+            className={`chart-tf-btn ${selectedTf === tf ? "active" : ""}`}
+            onClick={() => setSelectedTf(tf)}
+          >
+            {tf}
+          </button>
+        ))}
+      </div>
 
-          {/* ── Horizontal grid ─────────────────────────────────────────── */}
-          {gridPrices.map((p, i) => (
-            <line key={`hg${i}`} x1={0} y1={py(p)} x2={chartW} y2={py(p)}
-              stroke={TV_GRID_H} strokeWidth={1} />
-          ))}
+      {/* ── Interactive chart ───────────────────────────────────────── */}
+      <div ref={containerRef} className="lw-chart-container" />
 
-          {/* ── Vertical grid ───────────────────────────────────────────── */}
-          {timeIdxs.map((idx) => (
-            <line key={`vg${idx}`} x1={cx(idx)} y1={PAD_TOP} x2={cx(idx)} y2={CHART_H - PAD_BOTTOM}
-              stroke={TV_GRID_V} strokeWidth={1} />
-          ))}
-
-          {/* ── Watermark ───────────────────────────────────────────────── */}
-          <text x={chartW / 2} y={CHART_H / 2 + 12}
-            fill={TV_WATERMARK} fontSize={26} fontFamily="sans-serif"
-            fontWeight="bold" textAnchor="middle">
-            Crypto and Forex Trading
-          </text>
-
-          {/* ── Trendlines — drawn BELOW candles ────────────────────────── */}
-          {trendlines.map((t) => {
-            const i1 = t.x1 - offset;
-            const i2 = t.x2 - offset;
-            const x1c = cx(i1), x2c = cx(i2);
-            const y1c = py(t.y1), y2c = py(t.y2);
-            // Extrapolate to full chart width
-            const slope = (y2c - y1c) / (x2c - x1c || 1);
-            const xL = 0,   yL = y1c + slope * (xL - x1c);
-            const xR = chartW, yR = y1c + slope * (xR - x1c);
-            // Gray like TradingView default trendline color
-            const lineColor = "#9e9e9e";
-            return (
-              <g key={t.id}>
-                {/* Glow */}
-                <line x1={xL} y1={yL} x2={xR} y2={yR}
-                  stroke={lineColor} strokeWidth={7} opacity={0.08} />
-                {/* Main line */}
-                <line x1={xL} y1={yL} x2={xR} y2={yR}
-                  stroke={lineColor} strokeWidth={2} opacity={0.85} />
-                {/* Anchor dot at newest point */}
-                <circle cx={x2c} cy={y2c} r={3} fill={lineColor} opacity={0.7} />
-              </g>
-            );
-          })}
-
-          {/* ── Horizontal level lines ──────────────────────────────────── */}
-          <HLine y={py(pendingShort)} color="#ef5350"
-            label="Đặt Lệnh Chờ Tự Động Short" price={fmt(pendingShort)} chartW={chartW} axisW={PRICE_AXIS_W} />
-          <HLine y={py(targetPrice)} color="#ffd600"
-            label="Giá Thị Trường Sẽ Hướng Tới" price={fmt(targetPrice)} chartW={chartW} axisW={PRICE_AXIS_W} />
-          <HLine y={py(pivot)} color="#00e5ff"
-            label="Pivot" price={fmt(pivot)} chartW={chartW} axisW={PRICE_AXIS_W} dashed />
-          <HLine y={py(pendingLong)} color="#26a69a"
-            label="Đặt Lệnh Chờ Tự Động Long" price={fmt(pendingLong)} chartW={chartW} axisW={PRICE_AXIS_W} />
-
-          {/* ── Candles ─────────────────────────────────────────────────── */}
-          {visible.map((c, i) => {
-            const x     = cx(i);
-            const isUp  = c.close >= c.open;
-            const color = isUp ? UP_COLOR : DN_COLOR;
-            const bTop  = py(Math.max(c.open, c.close));
-            const bBot  = py(Math.min(c.open, c.close));
-            const bH    = Math.max(1, bBot - bTop);
-            return (
-              <g key={c.time}>
-                <line x1={x} y1={py(c.high)} x2={x} y2={py(c.low)}
-                  stroke={color} strokeWidth={1.2} />
-                <rect x={x - bodyW / 2} y={bTop} width={bodyW} height={bH}
-                  fill={color} />
-              </g>
-            );
-          })}
-
-          {/* ── Price axis background ────────────────────────────────────── */}
-          <rect x={chartW} y={0} width={PRICE_AXIS_W} height={CHART_H} fill={TV_BG_AXIS} />
-          <line x1={chartW} y1={0} x2={chartW} y2={CHART_H} stroke={TV_BORDER} strokeWidth={1} />
-
-          {/* ── Price axis labels ────────────────────────────────────────── */}
-          {gridPrices.map((p, i) => (
-            <text key={`al${i}`} x={chartW + 5} y={py(p) + 4}
-              fill={TV_AXIS_TXT} fontSize={9} fontFamily="monospace">
-              {fmt(p)}
-            </text>
-          ))}
-
-          {/* ── Current price marker ─────────────────────────────────────── */}
-          <CurrentPriceMarker y={py(currentPrice)} chartW={chartW}
-            totalW={TOTAL_W} label={fmt(currentPrice)} />
-
-          {/* ── Time axis ────────────────────────────────────────────────── */}
-          {timeIdxs.map((idx) => {
-            const c = visible[idx];
-            if (!c) return null;
-            const d = new Date(c.time * 1000);
-            const h = d.getUTCHours(), m = d.getUTCMinutes();
-            const lbl = (h === 0 && m === 0)
-              ? `${d.getUTCDate()}/${d.getUTCMonth() + 1}`
-              : `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-            return (
-              <text key={`t${idx}`} x={cx(idx)} y={CHART_H - 6}
-                fill={TV_TIME_TXT} fontSize={8} fontFamily="monospace" textAnchor="middle">
-                {lbl}
-              </text>
-            );
-          })}
-        </svg>
-
-        {/* ── Reasoning overlay ────────────────────────────────────────── */}
-        <div className="chart-reasoning">
-          {scenario.explanationLines.map((line, i) => (
-            <div key={i} className="reasoning-line">
-              {formatLine(line, i)}
-            </div>
-          ))}
-        </div>
+      {/* ── Reasoning overlay ───────────────────────────────────────── */}
+      <div className="chart-reasoning">
+        {scenario.explanationLines.map((line, i) => (
+          <div key={i} className="reasoning-line">
+            {formatLine(line, i)}
+          </div>
+        ))}
       </div>
     </div>
-  );
-}
-
-// ── Horizontal level line with TradingView-style badge ────────────────────────
-function HLine({
-  y, color, label, price, chartW, axisW, dashed,
-}: {
-  y: number; color: string; label: string; price: string;
-  chartW: number; axisW: number; dashed?: boolean;
-}) {
-  // Left label tag
-  const tagW = Math.min(label.length * 5.5 + 10, chartW - 4);
-  // Right price badge in axis area
-  const badgeX = chartW + 1;
-  const badgeW = axisW - 2;
-  return (
-    <g>
-      {/* Dashed/solid line across chart */}
-      <line x1={0} y1={y} x2={chartW} y2={y}
-        stroke={color} strokeWidth={1}
-        strokeDasharray={dashed ? "5,4" : undefined}
-        opacity={0.8} />
-      {/* Left coloured tab */}
-      <rect x={1} y={y - 9} width={tagW} height={14} fill={color} fillOpacity={0.15} rx={2} />
-      <rect x={1} y={y - 9} width={3}    height={14} fill={color} rx={1} />
-      <text x={8} y={y + 3.5} fill={color} fontSize={8} fontFamily="monospace" fontWeight="600">
-        {label}
-      </text>
-      {/* Right price badge (on top of price axis) */}
-      <rect x={badgeX} y={y - 8} width={badgeW} height={15} fill={color} rx={2} />
-      <text x={badgeX + badgeW / 2} y={y + 4}
-        fill="#000" fontSize={9} fontFamily="monospace" fontWeight="700" textAnchor="middle">
-        {price}
-      </text>
-    </g>
-  );
-}
-
-// ── Current price badge ────────────────────────────────────────────────────────
-function CurrentPriceMarker({
-  y, chartW, totalW, label,
-}: {
-  y: number; chartW: number; totalW: number; label: string;
-}) {
-  const axisW = totalW - chartW;
-  return (
-    <g>
-      <line x1={0} y1={y} x2={chartW} y2={y}
-        stroke="#ffffff" strokeWidth={0.5} strokeDasharray="2,4" opacity={0.2} />
-      <rect x={chartW + 1} y={y - 8} width={axisW - 2} height={15}
-        fill="#1565c0" rx={2} />
-      <text x={chartW + axisW / 2} y={y + 4}
-        fill="#fff" fontSize={9.5} fontFamily="monospace" fontWeight="bold" textAnchor="middle">
-        {label}
-      </text>
-    </g>
   );
 }
 

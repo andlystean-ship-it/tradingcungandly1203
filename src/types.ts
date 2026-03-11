@@ -1,5 +1,17 @@
 // ── Primitives ────────────────────────────────────────────────────────────────
-export type Symbol = "XAU/USDT" | "BTC/USDT";
+export type Symbol =
+  | "XAU/USDT"
+  | "BTC/USDT"
+  | "ETH/USDT"
+  | "SOL/USDT"
+  | "BNB/USDT"
+  | "XRP/USDT"
+  | "ADA/USDT"
+  | "DOGE/USDT"
+  | "DOT/USDT"
+  | "AVAX/USDT"
+  | "LINK/USDT"
+  | "SUI/USDT";
 export type Direction = "long" | "short";
 export type Bias = "bullish" | "bearish" | "neutral";
 export type Timeframe = "15M" | "1H" | "2H" | "4H" | "6H" | "8H" | "12H" | "1D";
@@ -113,6 +125,7 @@ export type EngineOutput = {
   currentPrice: number;
   lastUpdated: string;
   chartCandles: CandleData[]; // 1H candles used for chart rendering
+  candleMap: Record<Timeframe, CandleData[]>; // all timeframe candles
   marketBias: MarketBias;
   timeframeSignals: TimeframeSignal[];
   trendlines: Trendline[];

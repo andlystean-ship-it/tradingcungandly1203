@@ -113,6 +113,44 @@ const BTC_NEWS: NewsItem[] = [
   },
 ];
 
+const GENERIC_NEWS: NewsItem[] = [
+  {
+    id: "gen-1",
+    source: "CoinDesk",
+    publishedAt: "1 giờ trước",
+    title: "Thị trường crypto đang trong giai đoạn tích lũy",
+    summary: "Phần lớn các altcoin đang consolidation trong biên độ hẹp, chờ tín hiệu breakout rõ ràng từ BTC.",
+    relatedCoins: ["BTC", "ETH", "ALT"],
+    sentimentLabel: "neutral",
+    sentimentScore: 50,
+    hasTargetPrice: false,
+  },
+  {
+    id: "gen-2",
+    source: "The Block",
+    publishedAt: "3 giờ trước",
+    title: "Dòng tiền DeFi tăng trở lại trong tuần qua",
+    summary: "TVL trên các protocol DeFi tăng 8% so với tuần trước, cho thấy tín hiệu risk-on đang quay lại thị trường.",
+    relatedCoins: ["ETH", "SOL", "AVAX"],
+    sentimentLabel: "bullish",
+    sentimentScore: 62,
+    hasTargetPrice: false,
+  },
+  {
+    id: "gen-3",
+    source: "Cointelegraph",
+    publishedAt: "5 giờ trước",
+    title: "Phân tích kỹ thuật: Altcoin season có thể bắt đầu",
+    summary: "Chỉ số Altcoin Season Index đạt 60/100, cho thấy altcoin đang bắt đầu outperform BTC trong ngắn hạn.",
+    relatedCoins: ["ALT", "ETH", "SOL"],
+    sentimentLabel: "bullish",
+    sentimentScore: 65,
+    hasTargetPrice: false,
+  },
+];
+
 export function getNews(symbol: Symbol): NewsItem[] {
-  return symbol === "XAU/USDT" ? XAU_NEWS : BTC_NEWS;
+  if (symbol === "XAU/USDT") return XAU_NEWS;
+  if (symbol === "BTC/USDT") return BTC_NEWS;
+  return GENERIC_NEWS;
 }

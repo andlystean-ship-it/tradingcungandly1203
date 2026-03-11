@@ -21,10 +21,20 @@ function seededRng(seed: number): () => number {
 }
 
 // ── Per-symbol base configuration ─────────────────────────────────────────────
-const SYMBOL_CFG = {
-  "XAU/USDT": { seed: 42, basePrice: 3110, volatility: 10 },
-  "BTC/USDT": { seed: 77, basePrice: 83000, volatility: 650 },
-} as const;
+const SYMBOL_CFG: Record<Symbol, { seed: number; basePrice: number; volatility: number }> = {
+  "XAU/USDT": { seed: 42, basePrice: 5180, volatility: 15 },
+  "BTC/USDT": { seed: 77, basePrice: 70000, volatility: 650 },
+  "ETH/USDT": { seed: 101, basePrice: 2070, volatility: 40 },
+  "SOL/USDT": { seed: 113, basePrice: 87, volatility: 3 },
+  "BNB/USDT": { seed: 127, basePrice: 650, volatility: 12 },
+  "XRP/USDT": { seed: 139, basePrice: 1.39, volatility: 0.04 },
+  "ADA/USDT": { seed: 151, basePrice: 0.26, volatility: 0.008 },
+  "DOGE/USDT": { seed: 163, basePrice: 0.094, volatility: 0.003 },
+  "DOT/USDT": { seed: 173, basePrice: 1.54, volatility: 0.05 },
+  "AVAX/USDT": { seed: 187, basePrice: 9.7, volatility: 0.3 },
+  "LINK/USDT": { seed: 199, basePrice: 9.1, volatility: 0.25 },
+  "SUI/USDT": { seed: 211, basePrice: 0.99, volatility: 0.03 },
+};
 
 // ── Timeframe → candle interval in seconds ────────────────────────────────────
 export const TF_SECONDS: Record<Timeframe, number> = {
