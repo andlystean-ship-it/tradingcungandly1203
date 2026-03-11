@@ -8,11 +8,15 @@
  * 3. Compute momentum from the last N candles (more recent candles weighted more)
  * 4. Combine into a [0, 100] bullish score (0 = max bearish, 100 = max bullish)
  *
- * No random noise is added here — results are fully deterministic from candles.
+ * bullishLevel / bearishLevel are derived from confirmed swing structure of
+ * each timeframe's own candles (not uniform pivot arithmetic), so they are
+ * naturally distinct across 15M / 1H / 4H / 1D.
+ * Falls back to pivot R1/S1 when no relevant swings exist.
  */
 
 import type { CandleData, Timeframe, TimeframeSignal, Bias } from "../types";
 import { calcPivot, nearestSupport, nearestResistance } from "./pivot";
+import { detectSwingHighs, detectSwingLows } from "./swings";
 
 /** Timeframe weight for global bias aggregation (higher = more influential) */
 export const TF_WEIGHTS: Record<Timeframe, number> = {
@@ -38,9 +42,8 @@ export function scoreTimeframe(
 
   // ── Price position score (0–100) ────────────────────────────────────────────
   // Map position relative to [S2, R2] onto [0, 100].
-  // Clamp to avoid extreme outliers from expanding range.
   const rangeHigh = levels.r2;
-  const rangeLow = levels.s2;
+  const rangeLow  = levels.s2;
   const rangeSpan = rangeHigh - rangeLow || 1;
   const positionScore = Math.max(
     0,
@@ -48,37 +51,58 @@ export function scoreTimeframe(
   );
 
   // ── Momentum score (0–100) ─────────────────────────────────────────────────
-  // Weighted average of close-over-open for last 8 candles.
-  // Recent candles count more. We map [-1, +1] onto [0, 100].
   const recentSlice = candles.slice(-8);
   let weightedSum = 0;
   let totalWeight = 0;
   for (let i = 0; i < recentSlice.length; i++) {
     const c = recentSlice[i];
-    const w = i + 1; // later candles have higher weight
+    const w = i + 1;
     const bodyRange = Math.max(Math.abs(c.high - c.low), 0.0001);
     const bullishBody = (c.close - c.open) / bodyRange; // [-1, +1]
     weightedSum += bullishBody * w;
     totalWeight += w;
   }
-  const momentum = weightedSum / totalWeight; // [-1, +1]
-  const momentumScore = 50 + momentum * 50; // [0, 100]
+  const momentum      = weightedSum / totalWeight;
+  const momentumScore = 50 + momentum * 50;
 
   // ── Combined score (position 60% + momentum 40%) ───────────────────────────
   const rawScore = positionScore * 0.6 + momentumScore * 0.4;
-  const score = Math.round(Math.max(0, Math.min(100, rawScore)));
+  const score    = Math.round(Math.max(0, Math.min(100, rawScore)));
   const bias: Bias = score > 55 ? "bullish" : score < 45 ? "bearish" : "neutral";
 
-  // ── Bullish/bearish levels for UI card display ─────────────────────────────
-  // bullishLevel = nearest resistance above price (take-profit area)
-  // bearishLevel = nearest support below price (entry/stop area)
-  const bullishLevel = nearestResistance(levels, currentPrice);
-  const bearishLevel = nearestSupport(levels, currentPrice);
+  // ── Swing-based bullish / bearish levels ────────────────────────────────────
+  // Use the nearest confirmed swing HIGH above price as the resistance target
+  // (bullishLevel) and nearest confirmed swing LOW below price as support
+  // (bearishLevel).  Each TF has its own swing structure, so these values are
+  // naturally distinct across timeframes.  Fall back to pivot arithmetic when
+  // no relevant swing exists within 3 × average bar range.
+  const avgBarRange =
+    candles.slice(-14).reduce((s, c) => s + (c.high - c.low), 0) /
+    Math.max(candles.slice(-14).length, 1);
+  const searchWindow = avgBarRange * 6;
+
+  const swingHighsAbove = detectSwingHighs(candles, 3, 2)
+    .filter((sh) => sh.price > currentPrice && sh.price <= currentPrice + searchWindow)
+    .sort((a, b) => a.price - b.price);
+
+  const swingLowsBelow = detectSwingLows(candles, 3, 2)
+    .filter((sl) => sl.price < currentPrice && sl.price >= currentPrice - searchWindow)
+    .sort((a, b) => b.price - a.price);
+
+  const bullishLevel =
+    swingHighsAbove.length > 0
+      ? swingHighsAbove[0].price
+      : nearestResistance(levels, currentPrice);
+
+  const bearishLevel =
+    swingLowsBelow.length > 0
+      ? swingLowsBelow[0].price
+      : nearestSupport(levels, currentPrice);
 
   return {
     timeframe,
-    bullishLevel,
-    bearishLevel,
+    bullishLevel: Math.round(bullishLevel * 100) / 100,
+    bearishLevel: Math.round(bearishLevel * 100) / 100,
     bullishScore: score,
     bearishScore: 100 - score,
     bias,

@@ -91,6 +91,12 @@ export type MarketScenario = {
   scenarioState: ScenarioState;
   status: SignalStatus;
   trendlines: Trendline[];
+  // ── Debug / audit fields (optional) ────────────────────────────────────────
+  pendingLongReason?: string;
+  pendingShortReason?: string;
+  targetReason?: string;
+  invalidationReason?: string;
+  zone?: string; // e.g. "bull1", "trans", "bear1"
 };
 
 // ── Data freshness ────────────────────────────────────────────────────────────
