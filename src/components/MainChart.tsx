@@ -300,5 +300,3 @@ function formatLine(line: string, index: number) {
     </>
   );
 }
-
-

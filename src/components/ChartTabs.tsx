@@ -39,7 +39,7 @@ export default function ChartTabs({ scenario }: Props) {
         {activeTab === "signals" && <SignalsTab scenario={scenario} />}
         {activeTab === "analysis" && <AnalysisTab scenario={scenario} />}
         {activeTab === "trendlines" && (
-          <TrendlinesTab trendlines={activeTrendlines} candles={scenario} />
+          <TrendlinesTab trendlines={activeTrendlines} scenario={scenario} />
         )}
       </div>
     </>
@@ -112,7 +112,7 @@ function TrendlinesTab({
   trendlines,
 }: {
   trendlines: Trendline[];
-  candles: MarketScenario;
+  scenario: MarketScenario;
 }) {
   if (trendlines.length === 0) {
     return (
