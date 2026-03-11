@@ -17,13 +17,14 @@ import type {
   Timeframe,
   EngineOutput,
   CandleData,
+  TimeframeSignal,
 } from "../types";
 import { buildCandleMap, generateCandles } from "./candles";
 import { fetchCandleMap } from "./market-data";
 import { buildTrendlines } from "./trendlines";
-import { scoreTimeframe, TF_WEIGHTS } from "./scoring";
-import { computeBias } from "./bias";
-import { buildScenario } from "./scenario";
+import { scoreTimeframe, TF_WEIGHTS, type HTFContext } from "./scoring";
+import { computeBias, type BiasContext } from "./bias";
+import { buildScenario, type ScenarioInput } from "./scenario";
 
 export { getNews } from "./news";
 
@@ -31,6 +32,9 @@ export { getNews } from "./news";
 export function getChartCandles(symbol: Symbol, count = 80): CandleData[] {
   return generateCandles(symbol, "1H", count);
 }
+
+// ── HTF / LTF split ────────────────────────────────────────────────────────────
+const HTF_SET = new Set<Timeframe>(["4H", "6H", "8H", "12H", "1D"]);
 
 // ── Shared engine pipeline (symbol-agnostic) ──────────────────────────────────
 function runPipeline(
@@ -48,17 +52,45 @@ function runPipeline(
   // Trendlines from 1H swing structure
   const trendlines = buildTrendlines(chartCandles);
 
-  // Score each timeframe independently from its own candles
+  // ── Two-pass scoring: HTF first, then LTF with htfContext ─────────────────
   const timeframes = Object.keys(TF_WEIGHTS) as Timeframe[];
-  const timeframeSignals = timeframes.map((tf) =>
-    scoreTimeframe(tf, candleMap[tf])
-  );
 
-  // Aggregate into global bias
-  const marketBias = computeBias(timeframeSignals);
+  // Pass 1: Score HTF (4H, 6H, 8H, 12H, 1D) — no parent context needed
+  const htfSignals: TimeframeSignal[] = [];
+  const htfScores: Partial<Record<Timeframe, number>> = {};
 
-  // Build market scenario
-  const marketScenario = buildScenario(chartCandles, trendlines, symbol);
+  for (const tf of timeframes) {
+    if (!HTF_SET.has(tf)) continue;
+    const signal = scoreTimeframe(tf, candleMap[tf]);
+    htfSignals.push(signal);
+    htfScores[tf] = signal.bullishScore;
+  }
+
+  // Pass 2: Score LTF (15M, 1H, 2H) with HTF alignment context
+  const htfContext: HTFContext = { htfScores };
+  const ltfSignals: TimeframeSignal[] = [];
+
+  for (const tf of timeframes) {
+    if (HTF_SET.has(tf)) continue;
+    const signal = scoreTimeframe(tf, candleMap[tf], htfContext);
+    ltfSignals.push(signal);
+  }
+
+  const timeframeSignals = [...ltfSignals, ...htfSignals];
+
+  // ── Aggregate into global bias with structure context ─────────────────────
+  const biasContext: BiasContext = { chartCandles, trendlines };
+  const marketBias = computeBias(timeframeSignals, biasContext);
+
+  // ── Build market scenario with full MTF input ─────────────────────────────
+  const scenarioInput: ScenarioInput = {
+    candleMap,
+    timeframeSignals,
+    marketBias,
+    chartTrendlines: trendlines,
+    symbol,
+  };
+  const marketScenario = buildScenario(scenarioInput);
 
   const dataStatus = {
     isStale: false,

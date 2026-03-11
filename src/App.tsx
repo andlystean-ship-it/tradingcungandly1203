@@ -15,11 +15,11 @@ export default function App() {
   const [symbol, setSymbol] = useState<Symbol>("XAU/USDT");
   const [direction, setDirection] = useState<Direction>("long");
 
-  const { output: engine, loading, initializing } = useEngine(symbol);
+  const { output: engine, loading, initializing, isStale } = useEngine(symbol);
   const news = getNews(symbol);
 
   // Show a minimal skeleton while the very first fetch resolves
-  if (initializing) {
+  if (initializing || !engine) {
     return (
       <div className="app">
         <Header
@@ -48,7 +48,7 @@ export default function App() {
         source={engine.dataStatus.sourceStatus}
         loading={loading}
         lastUpdated={engine.dataStatus.lastUpdated}
-        warning={engine.dataStatus.warning}
+        warning={isStale ? "Dữ liệu cũ — đang cố gắng kết nối lại…" : engine.dataStatus.warning}
       />
       <BiasBar bias={engine.marketBias} />
       <TimeframeStrip signals={engine.timeframeSignals} />

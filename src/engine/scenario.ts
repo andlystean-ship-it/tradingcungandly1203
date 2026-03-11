@@ -1,44 +1,169 @@
 /**
- * scenario.ts — Role-based scenario engine (refactored)
+ * scenario.ts — Multi-Timeframe Scenario Engine
  *
- * Level roles (strictly separated, never collapse by design):
+ * Consumes:
+ *   - candleMap (all timeframes)
+ *   - timeframeSignals (scored per TF)
+ *   - marketBias (aggregated global bias)
+ *   - trendlines (1H structure)
+ *   - pivot context from multiple TFs
  *
- *   pivot           = reference / balance level (from classic pivot calc)
- *   pendingLong     = nearest support: bounce / retest / long entry trigger
- *                     Rule: always below targetPrice
- *   pendingShort    = nearest resistance: rejection / short entry trigger
- *                     Rule: always above targetPrice
- *   targetPrice     = next tactical objective (between pendingLong and pendingShort)
- *   invalidationLevel = explicit fail point (outside both triggers)
+ * Level selection priority:
+ *   1. Confirmed swing structure (nearest SR cluster)
+ *   2. Trendline interaction levels
+ *   3. HTF levels (4H/1D pivot/S/R)
+ *   4. Fallback: 1H pivot arithmetic
  *
- * Zone map — each zone assigns DISTINCT levels (no two roles share a value):
- *
- *   bull2   price > r1         pendingLong=r1    target=r2   short=r3   inv=pivot
- *   bull1   pivot<price≤r1     pendingLong=pivot  target=r1   short=r2   inv=s1
- *   trans   s1<price≤pivot     pendingLong=s1    target=r1   short=r2   inv=s2
- *   bear1   s2<price≤s1        pendingShort=s1   target=s2   long=s3    inv=pivot
- *   bear2   price≤s2           pendingShort=s2   target=s3   long=s1    inv=r1
- *
- * Swing refinement: swap arithmetic levels for nearest confirmed swing
- *   high/low when one exists within 1 ATR of the arithmetic level.
- *
- * Uniqueness guard: enforce minimum 0.3% price gap between every pair of levels.
+ * Status policy:
+ *   - pending_long/short requires touch + candle confirmation
+ *   - watching when no confirmation yet
+ *   - invalidated when price closes beyond invalidation level
  */
 
 import type {
   CandleData,
   MarketScenario,
+  MarketBias,
+  TimeframeSignal,
   SignalStatus,
   ScenarioState,
   Symbol,
+  Timeframe,
   Trendline,
 } from "../types";
-import { calcPivot } from "./pivot";
+import { calcPivot, nearestSupport, nearestResistance } from "./pivot";
 import { detectSwingHighs, detectSwingLows } from "./swings";
 
-// ── Zone identification ────────────────────────────────────────────────────────
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+type CandleMap = Record<Timeframe, CandleData[]>;
+
+export type ScenarioInput = {
+  candleMap: CandleMap;
+  timeframeSignals: TimeframeSignal[];
+  marketBias: MarketBias;
+  chartTrendlines: Trendline[];
+  symbol: Symbol;
+};
+
 type Zone = "bull2" | "bull1" | "trans" | "bear1" | "bear2";
 
+// ── SR Cluster: aggregate support/resistance from multiple sources ────────────
+
+type SRLevel = {
+  price: number;
+  source: string;
+  strength: number; // 0-100
+};
+
+function buildSRCluster(
+  candleMap: CandleMap,
+  trendlines: Trendline[],
+  currentPrice: number
+): { supports: SRLevel[]; resistances: SRLevel[] } {
+  const supports: SRLevel[] = [];
+  const resistances: SRLevel[] = [];
+
+  // ── Swing levels from key timeframes ─────────────────────────────────────
+  const keyTFs: { tf: Timeframe; weight: number }[] = [
+    { tf: "1H", weight: 40 },
+    { tf: "4H", weight: 70 },
+    { tf: "12H", weight: 85 },
+    { tf: "1D", weight: 100 },
+  ];
+
+  for (const { tf, weight } of keyTFs) {
+    const candles = candleMap[tf];
+    if (!candles || candles.length < 10) continue;
+
+    const swingHighs = detectSwingHighs(candles, 3, 2);
+    const swingLows = detectSwingLows(candles, 3, 2);
+
+    for (const sh of swingHighs) {
+      const level: SRLevel = { price: sh.price, source: `swing-${tf}`, strength: weight };
+      if (sh.price > currentPrice) resistances.push(level);
+      else supports.push(level);
+    }
+    for (const sl of swingLows) {
+      const level: SRLevel = { price: sl.price, source: `swing-${tf}`, strength: weight };
+      if (sl.price < currentPrice) supports.push(level);
+      else resistances.push(level);
+    }
+  }
+
+  // ── Pivot levels from HTF ────────────────────────────────────────────────
+  const htfTFs: { tf: Timeframe; weight: number }[] = [
+    { tf: "4H", weight: 60 },
+    { tf: "1D", weight: 90 },
+  ];
+
+  for (const { tf, weight } of htfTFs) {
+    const candles = candleMap[tf];
+    if (!candles || candles.length < 3) continue;
+    const levels = calcPivot(candles);
+
+    for (const [label, price] of Object.entries(levels)) {
+      if (typeof price !== "number") continue;
+      const level: SRLevel = { price, source: `pivot-${tf}-${label}`, strength: weight };
+      if (price > currentPrice) resistances.push(level);
+      else if (price < currentPrice) supports.push(level);
+    }
+  }
+
+  // ── Trendline projected levels ──────────────────────────────────────────
+  const chartCandles = candleMap["1H"];
+  if (chartCandles) {
+    const lastIdx = chartCandles.length - 1;
+    for (const t of trendlines) {
+      if (!t.active || t.x2 === t.x1) continue;
+      const slope = (t.y2 - t.y1) / (t.x2 - t.x1);
+      const projected = t.y1 + slope * (lastIdx - t.x1);
+
+      const level: SRLevel = {
+        price: projected,
+        source: `trendline-${t.kind}`,
+        strength: t.strength,
+      };
+      if (projected > currentPrice) resistances.push(level);
+      else supports.push(level);
+    }
+  }
+
+  // ── Cluster: merge nearby levels (within 0.3% of each other) ─────────────
+  const clusterMerge = (levels: SRLevel[]): SRLevel[] => {
+    if (levels.length === 0) return [];
+    const sorted = [...levels].sort((a, b) => a.price - b.price);
+    const merged: SRLevel[] = [sorted[0]];
+
+    for (let i = 1; i < sorted.length; i++) {
+      const prev = merged[merged.length - 1];
+      if (Math.abs(sorted[i].price - prev.price) / prev.price < 0.003) {
+        // Merge: keep higher strength, average price
+        prev.price = (prev.price * prev.strength + sorted[i].price * sorted[i].strength) /
+          (prev.strength + sorted[i].strength);
+        prev.strength = Math.min(100, prev.strength + sorted[i].strength * 0.3);
+        prev.source += `+${sorted[i].source}`;
+      } else {
+        merged.push({ ...sorted[i] });
+      }
+    }
+    return merged;
+  };
+
+  return {
+    supports: clusterMerge(supports).sort((a, b) => b.price - a.price),  // nearest first
+    resistances: clusterMerge(resistances).sort((a, b) => a.price - b.price), // nearest first
+  };
+}
+
+// ── ATR approximation ─────────────────────────────────────────────────────────
+function approxATR(candles: CandleData[], n = 14): number {
+  const slice = candles.slice(-n);
+  if (slice.length === 0) return 0;
+  return slice.reduce((acc, c) => acc + (c.high - c.low), 0) / slice.length;
+}
+
+// ── Zone identification ────────────────────────────────────────────────────────
 function identifyZone(
   price: number,
   pivot: number,
@@ -53,293 +178,259 @@ function identifyZone(
   return "bear2";
 }
 
-// ── ATR approximation from recent candles ─────────────────────────────────────
-function approxATR(candles: CandleData[], n = 14): number {
-  const slice = candles.slice(-n);
-  if (slice.length === 0) return 0;
-  const sum = slice.reduce((acc, c) => acc + (c.high - c.low), 0);
-  return sum / slice.length;
+// ── Determine primary side from MTF consensus ──────────────────────────────────
+function determinePrimarySide(
+  zone: Zone,
+  marketBias: MarketBias,
+  htfSignals: TimeframeSignal[]
+): "long" | "short" {
+  const htfBullish = htfSignals.filter(s => s.bias === "bullish").length;
+  const htfBearish = htfSignals.filter(s => s.bias === "bearish").length;
+
+  // Zone-based default
+  const zoneLong = zone === "bull2" || zone === "bull1" || zone === "trans";
+
+  // If HTF strongly disagrees with zone, defer to HTF
+  if (zoneLong && htfBearish > htfBullish && marketBias.confidence > 30) {
+    return "short";
+  }
+  if (!zoneLong && htfBullish > htfBearish && marketBias.confidence > 30) {
+    return "long";
+  }
+
+  return zoneLong ? "long" : "short";
 }
 
-// ── Nearest swing high above price within maxDist ─────────────────────────────
-function nearestSwingHighAbove(
-  candles: CandleData[],
-  price: number,
-  fallback: number,
-  maxDist: number
-): number {
-  const highs = detectSwingHighs(candles, 3, 2)
-    .filter((sh) => sh.price > price && sh.price <= price + maxDist)
-    .sort((a, b) => a.price - b.price);
-  return highs.length > 0 ? highs[0].price : fallback;
-}
-
-// ── Nearest swing low below price within maxDist ──────────────────────────────
-function nearestSwingLowBelow(
-  candles: CandleData[],
-  price: number,
-  fallback: number,
-  maxDist: number
-): number {
-  const lows = detectSwingLows(candles, 3, 2)
-    .filter((sl) => sl.price < price && sl.price >= price - maxDist)
-    .sort((a, b) => b.price - a.price);
-  return lows.length > 0 ? lows[0].price : fallback;
-}
-
-// ── Signal status ─────────────────────────────────────────────────────────────
+// ── Confirmation-based signal status (P6) ──────────────────────────────────────
 function deriveStatus(
-  price: number,
+  candles: CandleData[],
   pendingLong: number,
-  pendingShort: number
+  pendingShort: number,
+  invalidationLevel: number,
+  primarySide: "long" | "short"
 ): SignalStatus {
-  const gap = Math.abs(pendingShort - pendingLong) || 1;
-  const thresh = gap * 0.04; // within 4% of the level gap
-  if (Math.abs(price - pendingLong) <= thresh) return "pending_long";
-  if (Math.abs(price - pendingShort) <= thresh) return "pending_short";
+  const recent = candles.slice(-5);
+  if (recent.length < 2) return "watching";
+
+  const currentPrice = recent[recent.length - 1].close;
+  const atr = recent.reduce((s, c) => s + (c.high - c.low), 0) / recent.length;
+  const touchZone = atr * 0.4;
+
+  // Check invalidation first
+  if (primarySide === "long" && currentPrice < invalidationLevel) return "invalidated";
+  if (primarySide === "short" && currentPrice > invalidationLevel) return "invalidated";
+
+  // Check for touch + candle close confirmation at pending levels
+  for (let i = 0; i < recent.length - 1; i++) {
+    const c = recent[i];
+    const nextC = recent[i + 1];
+
+    if (c.low <= pendingLong + touchZone && c.low >= pendingLong - touchZone) {
+      if (nextC.close > pendingLong) return "pending_long";
+    }
+    if (c.high >= pendingShort - touchZone && c.high <= pendingShort + touchZone) {
+      if (nextC.close < pendingShort) return "pending_short";
+    }
+  }
+
+  // Check for break/reclaim in last candle
+  const lastCandle = recent[recent.length - 1];
+  const prevCandle = recent[recent.length - 2];
+
+  if (prevCandle.close < pendingLong && lastCandle.close > pendingLong) return "pending_long";
+  if (prevCandle.close > pendingShort && lastCandle.close < pendingShort) return "pending_short";
+
   return "watching";
 }
 
 // ── Scenario state ────────────────────────────────────────────────────────────
 function deriveScenarioState(
   zone: Zone,
-  price: number,
-  pivot: number,
-  r1: number,
-  s1: number
+  primarySide: "long" | "short",
+  marketBias: MarketBias
 ): ScenarioState {
-  if (zone === "bull2" || zone === "bull1") return "bullish_primary";
-  if (zone === "bear1" || zone === "bear2") return "bearish_primary";
-  // trans zone: near pivot
-  if (Math.abs(price - pivot) < (r1 - s1) * 0.08) return "neutral_transition";
-  return "bullish_primary"; // trans still leans bullish
+  const zoneIsBullish = zone === "bull2" || zone === "bull1";
+  const zoneIsBearish = zone === "bear1" || zone === "bear2";
+
+  if ((zoneIsBullish && marketBias.dominantSide === "short") ||
+      (zoneIsBearish && marketBias.dominantSide === "long")) {
+    return "conflicted";
+  }
+
+  if (zone === "trans") return "neutral_transition";
+  if (primarySide === "long") return "bullish_primary";
+  return "bearish_primary";
 }
 
-// ── Explanation lines ─────────────────────────────────────────────────────────
+// ── Build explanation lines from full context ──────────────────────────────────
 function buildExplanationLines(
   zone: Zone,
+  primarySide: "long" | "short",
+  marketBias: MarketBias,
+  htfSignals: TimeframeSignal[],
   pivot: number,
-  r1: number,
-  s1: number,
-  s2: number,
   targetPrice: number,
   pendingLong: number,
   pendingShort: number,
+  invalidationLevel: number,
+  status: SignalStatus,
   fmt: (n: number) => string
 ): string[] {
-  switch (zone) {
-    case "bull2":
-      return [
-        `Giá trên R1 (${fmt(r1)}), động lực tăng mạnh`,
-        `mục tiêu R2 tại ${fmt(targetPrice)}`,
-        `hỗ trợ R1 cũ tại ${fmt(pendingLong)}, canh long khi retest`,
-        `entry short alternate tại R3 (${fmt(pendingShort)}) nếu giá bác mạnh`,
-      ];
-    case "bull1":
-      return [
-        `Giá trên Pivot (${fmt(pivot)}), xu hướng tăng`,
-        `mục tiêu R1 tại ${fmt(targetPrice)}`,
-        `canh long retest Pivot tại ${fmt(pendingLong)}`,
-        `entry short alternate tại R2 (${fmt(pendingShort)}) nếu giá bác R1`,
-      ];
-    case "trans":
-      return [
-        `Giá đang ở phía dưới Pivot (${fmt(pivot)}), có xu hướng hồi phục`,
-        `mục tiêu R1 tại ${fmt(targetPrice)} sau khi vượt Pivot`,
-        `canh long tại S1 (${fmt(pendingLong)}) khi giá retest hỗ trợ`,
-        `entry short alternate tại R2 (${fmt(pendingShort)}) nếu giá bác R1`,
-      ];
-    case "bear1":
-      return [
-        `Giá dưới S1 (${fmt(s1)}), xu hướng giảm`,
-        `mục tiêu S2 tại ${fmt(targetPrice)}`,
-        `sẽ tăng về entry short tại S1 (${fmt(pendingShort)}) khi giá bật lên`,
-        `hỗ trợ sâu alternate tại ${fmt(pendingLong)} nếu giá giảm tiếp`,
-      ];
-    case "bear2":
-      return [
-        `Giá dưới S2 (${fmt(s2)}), áp lực bán lớn`,
-        `mục tiêu S3 tại ${fmt(targetPrice)}`,
-        `kháng cự S2 cũ tại ${fmt(pendingShort)}, canh short khi giá bật`,
-        `hồi phục mạnh về S1 (${fmt(pendingLong)}) sẽ đảo hướng`,
-      ];
+  const biasDir = marketBias.dominantSide === "long" ? "TĂNG" : "GIẢM";
+  const lines: string[] = [];
+
+  lines.push(
+    `Đa khung: ${biasDir} ${marketBias.bullishPercent}% (confidence ${marketBias.confidence}%) — ` +
+    `HTF ${htfSignals.map(s => `${s.timeframe}:${s.bias === "bullish" ? "↑" : s.bias === "bearish" ? "↓" : "—"}`).join(" ")}`
+  );
+
+  const zoneVi: Record<Zone, string> = {
+    bull2: "trên R1, xu hướng tăng mạnh",
+    bull1: "trên Pivot, xu hướng tăng",
+    trans: "vùng chuyển tiếp, chờ xác nhận",
+    bear1: "dưới S1, xu hướng giảm",
+    bear2: "dưới S2, áp lực bán lớn",
+  };
+  lines.push(`Zone: ${zone} — ${zoneVi[zone]}. Pivot ${fmt(pivot)}`);
+
+  if (primarySide === "long") {
+    lines.push(`Kịch bản chính: LONG entry ${fmt(pendingLong)} → target ${fmt(targetPrice)}`);
+  } else {
+    lines.push(`Kịch bản chính: SHORT entry ${fmt(pendingShort)} → target ${fmt(targetPrice)}`);
   }
+
+  const statusVi: Record<SignalStatus, string> = {
+    idle: "chờ",
+    watching: "theo dõi",
+    pending_long: "chờ xác nhận LONG",
+    pending_short: "chờ xác nhận SHORT",
+    active_long: "đang LONG",
+    active_short: "đang SHORT",
+    invalidated: "BỊ HỦY",
+    stale: "hết hạn",
+  };
+  lines.push(
+    `Invalidation: ${fmt(invalidationLevel)} | Trạng thái: ${statusVi[status]}`
+  );
+
+  return lines;
 }
 
 // ── Main scenario builder ─────────────────────────────────────────────────────
-export function buildScenario(
-  candles: CandleData[],
-  chartTrendlines: Trendline[],
-  symbol: Symbol
-): MarketScenario {
-  const levels = calcPivot(candles);
-  const { pivot, r1, r2, r3, s1, s2, s3 } = levels;
-  const currentPrice = candles[candles.length - 1].close;
+export function buildScenario(input: ScenarioInput): MarketScenario {
+  const { candleMap, timeframeSignals, marketBias, chartTrendlines, symbol } = input;
 
-  const atr = approxATR(candles);
-  // Allow swing refinement within 2 ATRs of the arithmetic level
-  const swingWindow = atr * 2 || (pivot * 0.015);
+  const chartCandles = candleMap["1H"];
+  const levels1H = calcPivot(chartCandles);
+  const { pivot, r1, r2, s1, s2 } = levels1H;
+  const currentPrice = chartCandles[chartCandles.length - 1].close;
 
-  // ── Zone identification ──────────────────────────────────────────────────────
+  // ── HTF context ──────────────────────────────────────────────────────────────
+  const htfSignals = timeframeSignals.filter(s =>
+    s.timeframe === "4H" || s.timeframe === "6H" || s.timeframe === "8H" ||
+    s.timeframe === "12H" || s.timeframe === "1D"
+  );
+
+  // HTF pivot levels for level enrichment
+  const levels1D = candleMap["1D"]?.length >= 3 ? calcPivot(candleMap["1D"]) : null;
+
+  // ── Build SR cluster from all sources ────────────────────────────────────────
+  const srCluster = buildSRCluster(candleMap, chartTrendlines, currentPrice);
+
+  // ── Zone identification (1H structure) ───────────────────────────────────────
   const zone = identifyZone(currentPrice, pivot, r1, s1, s2);
 
-  // ── Raw level assignment by zone ─────────────────────────────────────────────
-  let rawLong: number;
-  let rawTarget: number;
-  let rawShort: number;
-  let rawInvalidation: number;
-  let primarySide: "long" | "short";
+  // ── Primary side from MTF consensus (not just zone) ──────────────────────────
+  const primarySide = determinePrimarySide(zone, marketBias, htfSignals);
+
+  // ── Role-based level selection ───────────────────────────────────────────────
+  const minGap = currentPrice * 0.003;
+
+  let pendingLong: number;
+  let pendingShort: number;
+  let targetPrice: number;
+  let invalidationLevel: number;
   let longReason: string;
   let shortReason: string;
   let targetReason: string;
   let invReason: string;
 
-  switch (zone) {
-    case "bull2":
-      primarySide = "long";
-      rawLong = r1;
-      rawTarget = r2;
-      rawShort = r3;
-      rawInvalidation = pivot;
-      longReason = "R1 reclaim — former resistance becomes support retest zone";
-      shortReason = "R3 alternate rejection trigger above R2 target";
-      targetReason = "R2 — next resistance objective in uptrend";
-      invReason = "Pivot — reclaim failure below Pivot invalidates bullish structure";
-      break;
-    case "bull1":
-      primarySide = "long";
-      rawLong = pivot;
-      rawTarget = r1;
-      rawShort = r2;
-      rawInvalidation = s1;
-      longReason = "Pivot retest — balance level as long entry trigger";
-      shortReason = "R2 alternate rejection trigger; above R1 target";
-      targetReason = "R1 — nearest resistance; first upside objective";
-      invReason = "S1 — breach below S1 invalidates bullish scenario";
-      break;
-    case "trans":
-      primarySide = "long"; // lean long — mean reversion toward R1
-      rawLong = s1;
-      rawTarget = r1; // extended target — NOT pivot (avoids collapse with pivot)
-      rawShort = r2;
-      rawInvalidation = s2;
-      longReason = "S1 support zone — confirmed bounce / retest trigger";
-      shortReason = "R2 alternate rejection; above R1 target; bias flips short only beyond R2";
-      targetReason = "R1 — next resistance after pivot reclaim; pivot is waypoint not target";
-      invReason = "S2 — breach below S2 invalidates recovery thesis";
-      break;
-    case "bear1":
-      primarySide = "short";
-      rawShort = s1; // former support = new resistance; sell bounce here
-      rawTarget = s2;
-      rawLong = s3;
-      rawInvalidation = pivot;
-      longReason = "S3 deep support — alternate long only at extreme extension";
-      shortReason = "S1 rejection zone — former support now resistance; primary sell trigger";
-      targetReason = "S2 — next support; short target in bearish leg";
-      invReason = "Pivot — recovery above Pivot invalidates bearish scenario";
-      break;
-    case "bear2":
-    default:
-      primarySide = "short";
-      rawShort = s2;
-      rawTarget = s3;
-      rawLong = s1;
-      rawInvalidation = r1;
-      longReason = "S1 recovery level — alternate long trigger if price reclaims S1";
-      shortReason = "S2 rejection zone — former support now resistance; primary sell trigger";
-      targetReason = "S3 — extended bearish target below S2";
-      invReason = "R1 — recovery above R1 fully invalidates bearish leg";
-      break;
-  }
-
-  // ── Swing refinement ─────────────────────────────────────────────────────────
-  // Try to replace arithmetic levels with nearest confirmed swing structure.
-  // Only substitute when a swing exists within `swingWindow` of the arithmetic level.
   if (primarySide === "long") {
-    const swingLong = nearestSwingLowBelow(candles, currentPrice, rawLong, swingWindow * 1.5);
-    if (Math.abs(swingLong - rawLong) < swingWindow) {
-      rawLong = swingLong;
-      longReason += " (refined to nearest swing low)";
-    }
-    const swingShort = nearestSwingHighAbove(candles, rawTarget, rawShort, swingWindow * 2);
-    if (Math.abs(swingShort - rawShort) < swingWindow) {
-      rawShort = swingShort;
-      shortReason += " (refined to nearest swing high)";
-    }
+    const bestSupport = srCluster.supports[0];
+    pendingLong = bestSupport ? bestSupport.price : nearestSupport(levels1H, currentPrice);
+    longReason = bestSupport ? `SR cluster: ${bestSupport.source}` : "fallback pivot S/R";
+
+    const bestResistance = srCluster.resistances[0];
+    targetPrice = bestResistance ? bestResistance.price : nearestResistance(levels1H, currentPrice);
+    targetReason = bestResistance ? `SR cluster: ${bestResistance.source}` : "fallback pivot R";
+
+    const altResistance = srCluster.resistances[1] || srCluster.resistances[0];
+    pendingShort = altResistance ? Math.max(altResistance.price, targetPrice + minGap * 3) : r2;
+    shortReason = altResistance ? `Alternate: ${altResistance.source}` : "fallback R2";
+
+    const deeperSupport = srCluster.supports[1] || srCluster.supports[0];
+    invalidationLevel = deeperSupport
+      ? Math.min(deeperSupport.price, pendingLong - minGap * 2)
+      : (levels1D ? levels1D.s1 : s2);
+    invReason = "deeper SR cluster / HTF support";
   } else {
-    const swingShort = nearestSwingHighAbove(candles, currentPrice, rawShort, swingWindow * 1.5);
-    if (Math.abs(swingShort - rawShort) < swingWindow) {
-      rawShort = swingShort;
-      shortReason += " (refined to nearest swing high)";
-    }
-    const swingLong = nearestSwingLowBelow(candles, rawTarget, rawLong, swingWindow * 2);
-    if (Math.abs(swingLong - rawLong) < swingWindow) {
-      rawLong = swingLong;
-      longReason += " (refined to nearest swing low)";
-    }
+    const bestResistance = srCluster.resistances[0];
+    pendingShort = bestResistance ? bestResistance.price : nearestResistance(levels1H, currentPrice);
+    shortReason = bestResistance ? `SR cluster: ${bestResistance.source}` : "fallback pivot R";
+
+    const bestSupport = srCluster.supports[0];
+    targetPrice = bestSupport ? bestSupport.price : nearestSupport(levels1H, currentPrice);
+    targetReason = bestSupport ? `SR cluster: ${bestSupport.source}` : "fallback pivot S";
+
+    const altSupport = srCluster.supports[1] || srCluster.supports[0];
+    pendingLong = altSupport ? Math.min(altSupport.price, targetPrice - minGap * 3) : s2;
+    longReason = altSupport ? `Alternate: ${altSupport.source}` : "fallback S2";
+
+    const deeperResistance = srCluster.resistances[1] || srCluster.resistances[0];
+    invalidationLevel = deeperResistance
+      ? Math.max(deeperResistance.price, pendingShort + minGap * 2)
+      : (levels1D ? levels1D.r1 : r2);
+    invReason = "deeper SR cluster / HTF resistance";
   }
 
   // ── Uniqueness guard ──────────────────────────────────────────────────────────
-  // Minimum gap = 0.3 % of price (keeps levels distinct but not absurd)
-  const minGap = currentPrice * 0.003;
-
-  let pendingLong = rawLong;
-  let targetPrice = rawTarget;
-  let pendingShort = rawShort;
-  let invalidationLevel = rawInvalidation;
-
   if (primarySide === "long") {
-    // Ordering: pendingLong < pivot < ... < targetPrice < pendingShort
-    // 1. targetPrice must be above pendingLong + minGap
     targetPrice = Math.max(targetPrice, pendingLong + minGap * 3);
-    // 2. pendingShort must be above targetPrice + minGap
     pendingShort = Math.max(pendingShort, targetPrice + minGap * 3);
-    // 3. invalidationLevel must be below pendingLong − minGap
     invalidationLevel = Math.min(invalidationLevel, pendingLong - minGap * 2);
-    // 4. pivot must not equal targetPrice
-    if (Math.abs(targetPrice - pivot) < minGap) {
-      targetPrice = pivot + minGap * 3;
-    }
-    // 5. targetPrice must not equal pendingShort
-    if (Math.abs(pendingShort - targetPrice) < minGap) {
-      pendingShort = targetPrice + minGap * 3;
-    }
+    if (Math.abs(targetPrice - pivot) < minGap) targetPrice = pivot + minGap * 3;
+    if (Math.abs(pendingShort - targetPrice) < minGap) pendingShort = targetPrice + minGap * 3;
   } else {
-    // Ordering: pendingLong < targetPrice < ... < pendingShort
-    // (for short: price is between targetPrice below and pendingShort above)
-    // 1. targetPrice must be below pendingShort − minGap
     targetPrice = Math.min(targetPrice, pendingShort - minGap * 3);
-    // 2. pendingLong must be below targetPrice − minGap
     pendingLong = Math.min(pendingLong, targetPrice - minGap * 3);
-    // 3. invalidationLevel must be above pendingShort + minGap
     invalidationLevel = Math.max(invalidationLevel, pendingShort + minGap * 2);
-    // 4. pivot must not equal targetPrice
-    if (Math.abs(targetPrice - pivot) < minGap) {
-      targetPrice = pivot - minGap * 3;
-    }
-    // 5. targetPrice must not equal pendingShort
-    if (Math.abs(pendingShort - targetPrice) < minGap) {
-      targetPrice = pendingShort - minGap * 3;
-    }
+    if (Math.abs(targetPrice - pivot) < minGap) targetPrice = pivot - minGap * 3;
+    if (Math.abs(pendingShort - targetPrice) < minGap) targetPrice = pendingShort - minGap * 3;
   }
 
-  // Round to 2 decimal places
+  // Round
   const fix = (n: number) => Math.round(n * 100) / 100;
-  pendingLong      = fix(pendingLong);
-  targetPrice      = fix(targetPrice);
-  pendingShort     = fix(pendingShort);
+  pendingLong = fix(pendingLong);
+  targetPrice = fix(targetPrice);
+  pendingShort = fix(pendingShort);
   invalidationLevel = fix(invalidationLevel);
+
+  // ── Confirmation-based status ──────────────────────────────────────────────
+  const status = deriveStatus(chartCandles, pendingLong, pendingShort, invalidationLevel, primarySide);
+
+  // ── Scenario state from MTF context ──────────────────────────────────────
+  const scenarioState = deriveScenarioState(zone, primarySide, marketBias);
 
   const fmt = (n: number) => n.toFixed(2);
 
-  // ── Explanation lines ─────────────────────────────────────────────────────────
+  // ── Explanation lines from full context ──────────────────────────────────
   const explanationLines = buildExplanationLines(
-    zone, pivot, r1, s1, s2,
-    targetPrice, pendingLong, pendingShort, fmt
+    zone, primarySide, marketBias, htfSignals,
+    pivot, targetPrice, pendingLong, pendingShort, invalidationLevel,
+    status, fmt
   );
 
-  // ── Primary scenario (dominant direction) ────────────────────────────────────
+  // ── Primary + alternate scenarios ──────────────────────────────────────────
   const primaryScenario = {
     side: primarySide,
     trigger: primarySide === "long" ? pendingLong : pendingShort,
@@ -349,9 +440,6 @@ export function buildScenario(
       : `Short từ ${fmt(pendingShort)} → target ${fmt(targetPrice)}, inv ${fmt(invalidationLevel)}`,
   };
 
-  // ── Alternate scenario (opposite, conditional) ───────────────────────────────
-  // For long primary: short only triggers at pendingShort (above target) — NOT equal-weighted
-  // For short primary: long only triggers at pendingLong (below target) — NOT equal-weighted
   const alternateSide: "long" | "short" = primarySide === "long" ? "short" : "long";
   const alternateScenario = {
     side: alternateSide,
@@ -362,27 +450,28 @@ export function buildScenario(
       : `Alternate Long nếu giá về ${fmt(pendingLong)} và xác nhận hỗ trợ`,
   };
 
-  // ── Caution text ─────────────────────────────────────────────────────────────
+  // ── Caution text ──────────────────────────────────────────────────────────
+  let cautionText: string | undefined;
   const rangeSpan = r1 - s1 || 1;
-  const cautionText =
-    Math.abs(currentPrice - pivot) < rangeSpan * 0.06
-      ? `Giá sát Pivot — chờ xác nhận phá vỡ trước khi entry`
-      : undefined;
-
-  const scenarioState = deriveScenarioState(zone, currentPrice, pivot, r1, s1);
-  const status = deriveStatus(currentPrice, pendingLong, pendingShort);
+  if (Math.abs(currentPrice - pivot) < rangeSpan * 0.06) {
+    cautionText = "Giá sát Pivot — chờ xác nhận phá vỡ trước khi entry";
+  }
+  if (scenarioState === "conflicted") {
+    cautionText = (cautionText ? cautionText + ". " : "") +
+      "⚠ LTF và HTF đang xung đột — giảm size hoặc chờ confluence";
+  }
 
   return {
     symbol,
-    pivot:             fix(pivot),
-    currentPrice:      fix(currentPrice),
+    pivot: fix(pivot),
+    currentPrice: fix(currentPrice),
     targetPrice,
     pendingLong,
     pendingShort,
-    r1:                fix(r1),
-    s1:                fix(s1),
-    r2:                fix(r2),
-    s2:                fix(s2),
+    r1: fix(r1),
+    s1: fix(s1),
+    r2: fix(r2),
+    s2: fix(s2),
     primaryScenario,
     alternateScenario,
     explanationLines,
@@ -391,11 +480,10 @@ export function buildScenario(
     scenarioState,
     status,
     trendlines: chartTrendlines,
-    // Debug fields
-    pendingLongReason:   longReason,
-    pendingShortReason:  shortReason,
+    pendingLongReason: longReason,
+    pendingShortReason: shortReason,
     targetReason,
-    invalidationReason:  invReason,
+    invalidationReason: invReason,
     zone,
   };
 }

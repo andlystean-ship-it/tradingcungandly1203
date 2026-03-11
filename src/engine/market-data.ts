@@ -29,6 +29,9 @@ const CANDLE_LIMIT = 100; // candles per request
 const FETCH_TIMEOUT_MS = 8000;
 
 // ── Symbol → Binance pair ─────────────────────────────────────────────────────
+// XAU uses PAXGUSDT (Pax Gold, 1:1 gold-backed token on Binance spot).
+// True XAUUSD spot would require a forex/metals API (e.g., MetalpriceAPI).
+// TODO: If a metals API provider is added, route XAU through it instead.
 const BINANCE_SYMBOL: Record<Symbol, string> = {
   "XAU/USDT": "PAXGUSDT",
   "BTC/USDT": "BTCUSDT",
