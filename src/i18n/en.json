@@ -1,0 +1,166 @@
+{
+  "header": {
+    "title": "Crypto & Forex Trading",
+    "longOrder": "Pending Long",
+    "shortOrder": "Pending Short"
+  },
+  "symbols": {
+    "XAU/USDT": "XAU/USDT - Gold",
+    "BTC/USDT": "BTC/USDT - Bitcoin",
+    "ETH/USDT": "ETH/USDT - Ethereum",
+    "SOL/USDT": "SOL/USDT - Solana",
+    "BNB/USDT": "BNB/USDT - BNB",
+    "XRP/USDT": "XRP/USDT - Ripple",
+    "ADA/USDT": "ADA/USDT - Cardano",
+    "DOGE/USDT": "DOGE/USDT - Dogecoin",
+    "DOT/USDT": "DOT/USDT - Polkadot",
+    "AVAX/USDT": "AVAX/USDT - Avalanche",
+    "LINK/USDT": "LINK/USDT - Chainlink",
+    "SUI/USDT": "SUI/USDT - Sui"
+  },
+  "dataSource": {
+    "live": "LIVE",
+    "offline": "OFFLINE",
+    "partial": "(partial)",
+    "refreshing": "↻ refreshing…",
+    "updatedAt": "Updated",
+    "staleWarning": "Stale data — reconnecting…"
+  },
+  "bias": {
+    "marketIndex": "Market Index",
+    "priorityLong": "▲ Priority LONG",
+    "priorityShort": "▼ Priority SHORT",
+    "neutral": "◆ NEUTRAL"
+  },
+  "timeframe": {
+    "confluence": "Multi-Timeframe Confluence"
+  },
+  "tabs": {
+    "signals": "Live Signals",
+    "analysis": "Market Analysis",
+    "trendlines": "Trendlines"
+  },
+  "signals": {
+    "longEntry": "↑ Pending Long Order",
+    "longAuto": "Auto Long Entry",
+    "shortEntry": "↓ Pending Short Order",
+    "shortAuto": "Auto Short Entry",
+    "target": "🎯 Market Target Price",
+    "current": "Current",
+    "pivot": "Pivot"
+  },
+  "analysis": {
+    "above": "above",
+    "below": "below",
+    "pricePosition": "Current price {{price}} is {{side}} Pivot Point {{pivot}}",
+    "trendUp": "Trend leaning up toward Resistance R1 — nearest target {{target}}",
+    "trendDown": "Trend leaning down toward Support S1 — nearest target {{target}}",
+    "longScenario": "Long scenario: entry at {{entry}} on support confirmation",
+    "shortScenario": "Short scenario: entry at {{entry}} on resistance confirmation",
+    "trendlineCount": "{{count}} active trendlines — watch for breakout / rejection"
+  },
+  "trendlinePanel": {
+    "ascending": "Uptrend",
+    "descending": "Downtrend",
+    "active": "Active",
+    "noActive": "No active trendlines."
+  },
+  "news": {
+    "title": "News & Sentiment",
+    "count": "{{count}} articles",
+    "bullish": "Bullish",
+    "bearish": "Bearish",
+    "neutral": "Neutral",
+    "hasTarget": "Has Price Target"
+  },
+  "loading": {
+    "market": "Loading market data…"
+  },
+  "settings": {
+    "title": "Settings",
+    "theme": "Theme",
+    "dark": "Dark",
+    "light": "Light",
+    "language": "Language",
+    "alerts": "Price Alerts"
+  },
+  "alerts": {
+    "title": "Price Alerts",
+    "addAlert": "Add alert",
+    "above": "Above",
+    "below": "Below",
+    "triggered": "Triggered",
+    "active": "Active",
+    "noAlerts": "No alerts yet",
+    "notifyTitle": "Price Alert — {{symbol}}",
+    "notifyAbove": "Price crossed above {{price}}",
+    "notifyBelow": "Price dropped below {{price}}"
+  },
+  "signalHistory": {
+    "title": "Signal History",
+    "noHistory": "No signal history yet."
+  },
+  "engineConfig": {
+    "title": "Engine Parameters",
+    "minSwingDistance": "Min Swing Distance",
+    "minPriceSeparation": "Min SR Price Separation (%)",
+    "refreshInterval": "Refresh Interval (seconds)",
+    "srLevels": "S/R Levels Shown"
+  },
+  "chart": {
+    "showTrendlines": "Trendlines",
+    "showExplanation": "Explanation",
+    "zoomIn": "Zoom In",
+    "zoomOut": "Zoom Out",
+    "resetZoom": "Reset"
+  },
+  "scenario": {
+    "biasUp": "BULLISH",
+    "biasDown": "BEARISH",
+    "biasNeutral": "NEUTRAL",
+    "mtfLine": "MTF: {{bias}} {{bullish}}% (confidence {{confidence}}%) — HTF {{htf}}",
+    "zoneBull2": "above R1, strong uptrend",
+    "zoneBull1": "above Pivot, uptrend",
+    "zoneTrans": "transition zone, awaiting confirmation",
+    "zoneBear1": "below S1, downtrend",
+    "zoneBear2": "below S2, strong selling pressure",
+    "zoneLine": "Zone: {{zone}} — {{desc}}. Pivot {{pivot}}",
+    "trendAlignedBull": "trend aligned BULLISH",
+    "trendAlignedBear": "trend aligned BEARISH",
+    "trendMixed": "mixed trend",
+    "trendNeutral": "no clear trend",
+    "trendSupportAsc": "ascending support trendline active",
+    "trendResistDesc": "descending resistance trendline active",
+    "htfBullSupport": "HTF bullish trend supporting",
+    "htfBearPressure": "HTF bearish trend pressuring",
+    "neutralScenario": "Scenario: NEUTRAL — insufficient conditions for directional bias",
+    "neutralReason": "Reason: {{reason}}",
+    "mixedWarning": "⚠ Mixed trend — wait for clearer confirmation before entry",
+    "longActionable": "Primary: LONG entry {{entry}} → target {{target}}",
+    "longRef": "LONG setup at {{entry}} → reference only, low quality (quality {{quality}})",
+    "longHtfWarn": "⚠ HTF bearish trend — long is tactical only",
+    "shortActionable": "Primary: SHORT entry {{entry}} → target {{target}}",
+    "shortRef": "SHORT setup at {{entry}} → reference only, low quality (quality {{quality}})",
+    "shortHtfWarn": "⚠ HTF bullish trend — short is tactical only",
+    "statusIdle": "idle",
+    "statusWatching": "watching",
+    "statusPendingLong": "pending LONG",
+    "statusPendingShort": "pending SHORT",
+    "statusActiveLong": "active LONG",
+    "statusActiveShort": "active SHORT",
+    "statusInvalidated": "INVALIDATED",
+    "statusLowQuality": "low quality — reference only",
+    "statusStale": "stale",
+    "invalidationLine": "Invalidation: {{level}} | Status: {{status}}",
+    "longRationale": "Long from {{entry}} → target {{target}}, inv {{inv}}",
+    "shortRationale": "Short from {{entry}} → target {{target}}, inv {{inv}}",
+    "altShort": "Alternate Short if price rejects {{trigger}} — not primary scenario",
+    "altLong": "Alternate Long if price reaches {{trigger}} and confirms support",
+    "cautionPivot": "Price near Pivot — wait for breakout confirmation before entry",
+    "cautionConflict": "⚠ LTF and HTF conflicting — reduce size or wait for confluence",
+    "cautionMixed": "⚠ Mixed trend across timeframes — confidence reduced",
+    "cautionLongHtf": "HTF bearish — long scenario is tactical only",
+    "cautionShortHtf": "HTF bullish — short scenario is tactical only",
+    "cautionQuality": "⚠ Low quality setup: {{reason}}"
+  }
+}

@@ -3,13 +3,24 @@
  * React hook that manages the async engine lifecycle:
  *   - Fetches real Binance candles on mount and symbol change
  *   - Last-good-snapshot: keeps previous valid output during refresh/symbol-change
- *   - Marks data as stale if refresh fails instead of falling back to demo
- *   - Auto-refreshes every 60 seconds to pick up new candle closes
+ *   - Marks data as stale if refresh fails (keeps last-good-snapshot)
+ *   - Auto-refreshes on configurable interval (default 60s)
+ *   - Accepts configurable engine parameters for swing/trendline tuning
  */
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import type { Symbol, EngineOutput } from "../types";
-import { runEngineAsync } from "../engine/index";
+import { runEngineAsync, type EngineConfig as CoreEngineConfig } from "../engine/index";
+import { recordSignal } from "../engine/signal-history";
+
+export type EngineConfig = {
+  /** Minimum swing distance (candle indices) — passed to engine for future use */
+  minSwingDistance?: number;
+  /** Minimum price separation for SR dedup (percent) */
+  minPriceSeparationPct?: number;
+  /** Auto-refresh interval in seconds */
+  refreshIntervalSec?: number;
+};
 
 export type EngineState = {
   output: EngineOutput | null;
@@ -21,10 +32,12 @@ export type EngineState = {
   isStale: boolean;
 };
 
-/** How often to refresh live candle data (ms) */
-const REFRESH_INTERVAL_MS = 60_000;
+/** Default refresh interval */
+const DEFAULT_REFRESH_SEC = 60;
 
-export function useEngine(symbol: Symbol): EngineState {
+export function useEngine(symbol: Symbol, config?: EngineConfig): EngineState {
+  const refreshInterval = (config?.refreshIntervalSec ?? DEFAULT_REFRESH_SEC) * 1000;
+
   const [output, setOutput] = useState<EngineOutput | null>(null);
   const [loading, setLoading] = useState(true);
   const [initializing, setInitializing] = useState(true);
@@ -37,12 +50,22 @@ export function useEngine(symbol: Symbol): EngineState {
   const refresh = useCallback(async (isInitial: boolean) => {
     setLoading(true);
     try {
-      const result = await runEngineAsync(symbolRef.current);
+      const coreConfig: CoreEngineConfig | undefined =
+        (config?.minSwingDistance != null || config?.minPriceSeparationPct != null)
+          ? {
+              minSwingDistance: config.minSwingDistance,
+              minPriceSeparationPct: config.minPriceSeparationPct,
+            }
+          : undefined;
+      const result = await runEngineAsync(symbolRef.current, coreConfig);
       // Only apply if symbol hasn't changed while we were fetching
       if (result.symbol === symbolRef.current) {
         setOutput(result);
         setError(null);
         setIsStale(false);
+
+        // Record signal snapshot for history
+        recordSignal(result.symbol, result.marketScenario, result.marketBias);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Engine error";
@@ -56,7 +79,7 @@ export function useEngine(symbol: Symbol): EngineState {
       setLoading(false);
       if (isInitial) setInitializing(false);
     }
-  }, []);
+  }, [config?.minSwingDistance, config?.minPriceSeparationPct]);
 
   useEffect(() => {
     let cancelled = false;
@@ -76,14 +99,14 @@ export function useEngine(symbol: Symbol): EngineState {
 
     const interval = setInterval(() => {
       if (!cancelled) void doRefresh(false);
-    }, REFRESH_INTERVAL_MS);
+    }, refreshInterval);
 
     return () => {
       cancelled = true;
       clearInterval(interval);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [symbol]);
+  }, [symbol, refreshInterval]);
 
   return { output, loading, initializing, error, isStale };
 }

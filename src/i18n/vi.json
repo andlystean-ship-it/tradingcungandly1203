@@ -1,0 +1,166 @@
+{
+  "header": {
+    "title": "Crypto & Forex Trading",
+    "longOrder": "Lệnh Chờ Long",
+    "shortOrder": "Lệnh Chờ Short"
+  },
+  "symbols": {
+    "XAU/USDT": "XAU/USDT - Vàng",
+    "BTC/USDT": "BTC/USDT - Bitcoin",
+    "ETH/USDT": "ETH/USDT - Ethereum",
+    "SOL/USDT": "SOL/USDT - Solana",
+    "BNB/USDT": "BNB/USDT - BNB",
+    "XRP/USDT": "XRP/USDT - Ripple",
+    "ADA/USDT": "ADA/USDT - Cardano",
+    "DOGE/USDT": "DOGE/USDT - Dogecoin",
+    "DOT/USDT": "DOT/USDT - Polkadot",
+    "AVAX/USDT": "AVAX/USDT - Avalanche",
+    "LINK/USDT": "LINK/USDT - Chainlink",
+    "SUI/USDT": "SUI/USDT - Sui"
+  },
+  "dataSource": {
+    "live": "LIVE",
+    "offline": "OFFLINE",
+    "partial": "(partial)",
+    "refreshing": "↻ đang làm mới…",
+    "updatedAt": "Cập nhật",
+    "staleWarning": "Dữ liệu cũ — đang cố gắng kết nối lại…"
+  },
+  "bias": {
+    "marketIndex": "Chỉ số thị trường",
+    "priorityLong": "▲ Ưu tiên LONG",
+    "priorityShort": "▼ Ưu tiên SHORT",
+    "neutral": "◆ TRUNG LẬP"
+  },
+  "timeframe": {
+    "confluence": "Multi-Timeframe Confluence"
+  },
+  "tabs": {
+    "signals": "Tín hiệu Live",
+    "analysis": "Phân tích thị trường",
+    "trendlines": "Đường xu hướng"
+  },
+  "signals": {
+    "longEntry": "↑ Đặt Lệnh Chờ Long",
+    "longAuto": "Entry Long tự động",
+    "shortEntry": "↓ Đặt Lệnh Chờ Short",
+    "shortAuto": "Entry Short tự động",
+    "target": "🎯 Giá Thị Trường Sẽ Hướng Tới",
+    "current": "Hiện tại",
+    "pivot": "Pivot"
+  },
+  "analysis": {
+    "above": "trên",
+    "below": "dưới",
+    "pricePosition": "Giá hiện tại {{price}} đang ở phía {{side}} Pivot Point {{pivot}}",
+    "trendUp": "Xu hướng nghiêng lên, hướng về Resistance R1 — target gần nhất {{target}}",
+    "trendDown": "Xu hướng nghiêng xuống, hướng về Support S1 — target gần nhất {{target}}",
+    "longScenario": "Kịch bản Long: canh entry tại {{entry}} khi giá xác nhận hỗ trợ",
+    "shortScenario": "Kịch bản Short: canh entry tại {{entry}} khi giá xác nhận kháng cự",
+    "trendlineCount": "{{count}} đường xu hướng đang active — theo dõi breakout / rejection"
+  },
+  "trendlinePanel": {
+    "ascending": "Xu hướng tăng",
+    "descending": "Xu hướng giảm",
+    "active": "Active",
+    "noActive": "Không có đường xu hướng active."
+  },
+  "news": {
+    "title": "Tin tức & Sentiment",
+    "count": "{{count}} tin",
+    "bullish": "Tích cực",
+    "bearish": "Tiêu cực",
+    "neutral": "Trung tính",
+    "hasTarget": "Có Mục Tiêu Giá"
+  },
+  "loading": {
+    "market": "Đang tải dữ liệu thị trường…"
+  },
+  "settings": {
+    "title": "Cài đặt",
+    "theme": "Giao diện",
+    "dark": "Tối",
+    "light": "Sáng",
+    "language": "Ngôn ngữ",
+    "alerts": "Cảnh báo giá"
+  },
+  "alerts": {
+    "title": "Cảnh báo Giá",
+    "addAlert": "Thêm cảnh báo",
+    "above": "Trên",
+    "below": "Dưới",
+    "triggered": "Đã kích hoạt",
+    "active": "Đang hoạt động",
+    "noAlerts": "Chưa có cảnh báo nào",
+    "notifyTitle": "Cảnh báo giá — {{symbol}}",
+    "notifyAbove": "Giá đã vượt trên {{price}}",
+    "notifyBelow": "Giá đã giảm dưới {{price}}"
+  },
+  "signalHistory": {
+    "title": "Lịch sử tín hiệu",
+    "noHistory": "Chưa có lịch sử tín hiệu."
+  },
+  "engineConfig": {
+    "title": "Tham số Engine",
+    "minSwingDistance": "Khoảng cách Swing tối thiểu",
+    "minPriceSeparation": "Tách giá SR tối thiểu (%)",
+    "refreshInterval": "Chu kỳ làm mới (giây)",
+    "srLevels": "Số mức S/R hiển thị"
+  },
+  "chart": {
+    "showTrendlines": "Trendlines",
+    "showExplanation": "Giải thích",
+    "zoomIn": "Phóng to",
+    "zoomOut": "Thu nhỏ",
+    "resetZoom": "Reset"
+  },
+  "scenario": {
+    "biasUp": "TĂNG",
+    "biasDown": "GIẢM",
+    "biasNeutral": "TRUNG LẬP",
+    "mtfLine": "Đa khung: {{bias}} {{bullish}}% (confidence {{confidence}}%) — HTF {{htf}}",
+    "zoneBull2": "trên R1, xu hướng tăng mạnh",
+    "zoneBull1": "trên Pivot, xu hướng tăng",
+    "zoneTrans": "vùng chuyển tiếp, chờ xác nhận",
+    "zoneBear1": "dưới S1, xu hướng giảm",
+    "zoneBear2": "dưới S2, áp lực bán lớn",
+    "zoneLine": "Zone: {{zone}} — {{desc}}. Pivot {{pivot}}",
+    "trendAlignedBull": "xu hướng đồng thuận TĂNG",
+    "trendAlignedBear": "xu hướng đồng thuận GIẢM",
+    "trendMixed": "xu hướng trái chiều",
+    "trendNeutral": "chưa có xu hướng rõ",
+    "trendSupportAsc": "trendline hỗ trợ tăng đang active",
+    "trendResistDesc": "trendline kháng cự giảm đang active",
+    "htfBullSupport": "HTF trend tăng hỗ trợ",
+    "htfBearPressure": "HTF trend giảm gây áp lực",
+    "neutralScenario": "Kịch bản: TRUNG LẬP — chưa đủ điều kiện để xác định hướng chính",
+    "neutralReason": "Lý do: {{reason}}",
+    "mixedWarning": "⚠ Xu hướng trái chiều — chờ xác nhận rõ hơn trước khi vào lệnh",
+    "longActionable": "Kịch bản chính: LONG entry {{entry}} → target {{target}}",
+    "longRef": "Setup LONG tại {{entry}} → chỉ tham khảo, chưa đủ chất lượng (quality {{quality}})",
+    "longHtfWarn": "⚠ HTF trend giảm — long chỉ mang tính chiến thuật ngắn hạn",
+    "shortActionable": "Kịch bản chính: SHORT entry {{entry}} → target {{target}}",
+    "shortRef": "Setup SHORT tại {{entry}} → chỉ tham khảo, chưa đủ chất lượng (quality {{quality}})",
+    "shortHtfWarn": "⚠ HTF trend tăng — short chỉ mang tính chiến thuật ngắn hạn",
+    "statusIdle": "chờ",
+    "statusWatching": "theo dõi",
+    "statusPendingLong": "chờ xác nhận LONG",
+    "statusPendingShort": "chờ xác nhận SHORT",
+    "statusActiveLong": "đang LONG",
+    "statusActiveShort": "đang SHORT",
+    "statusInvalidated": "BỊ HỦY",
+    "statusLowQuality": "setup yếu — chỉ tham khảo",
+    "statusStale": "hết hạn",
+    "invalidationLine": "Invalidation: {{level}} | Trạng thái: {{status}}",
+    "longRationale": "Long từ {{entry}} → target {{target}}, inv {{inv}}",
+    "shortRationale": "Short từ {{entry}} → target {{target}}, inv {{inv}}",
+    "altShort": "Alternate Short nếu giá bác {{trigger}} — không phải kịch bản chính",
+    "altLong": "Alternate Long nếu giá về {{trigger}} và xác nhận hỗ trợ",
+    "cautionPivot": "Giá sát Pivot — chờ xác nhận phá vỡ trước khi entry",
+    "cautionConflict": "⚠ LTF và HTF đang xung đột — giảm size hoặc chờ confluence",
+    "cautionMixed": "⚠ Xu hướng trái chiều giữa các khung — confidence giảm",
+    "cautionLongHtf": "HTF trend giảm — kịch bản long chỉ mang tính chiến thuật",
+    "cautionShortHtf": "HTF trend tăng — kịch bản short chỉ mang tính chiến thuật",
+    "cautionQuality": "⚠ Setup chưa đủ chất lượng: {{reason}}"
+  }
+}

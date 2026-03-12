@@ -10,7 +10,7 @@
  */
 
 import type { CandleData, Trendline } from "../types";
-import { detectSwingHighs, detectSwingLows, type SwingPoint, DEFAULT_SWING_CONFIG } from "./swings";
+import { detectSwingHighs, detectSwingLows, type SwingPoint, type SwingConfig, DEFAULT_SWING_CONFIG } from "./swings";
 
 // ── Configuration ────────────────────────────────────────────────────────────
 
@@ -343,15 +343,17 @@ function generateCandidates(
 
 export function buildTrendlines(
   candles: CandleData[],
-  sourceTimeframe?: string
+  sourceTimeframe?: string,
+  swingOverrides?: Partial<SwingConfig>,
 ): Trendline[] {
-  const { trendlines } = buildTrendlinesWithDebug(candles, sourceTimeframe);
+  const { trendlines } = buildTrendlinesWithDebug(candles, sourceTimeframe, swingOverrides);
   return trendlines;
 }
 
 export function buildTrendlinesWithDebug(
   candles: CandleData[],
-  sourceTimeframe?: string
+  sourceTimeframe?: string,
+  swingOverrides?: Partial<SwingConfig>,
 ): { trendlines: Trendline[]; debug: TrendlineDebug } {
   if (candles.length < 10) {
     return {
@@ -369,12 +371,12 @@ export function buildTrendlinesWithDebug(
   const currentPrice = candles[candles.length - 1].close;
 
   // Structural swing config — tighter than default for quality anchors
-  const structConfig = {
+  const structConfig: SwingConfig = {
     ...DEFAULT_SWING_CONFIG,
     leftWindow: 5,
     rightConfirmationWindow: 3,
-    minSwingDistance: 5,
-    minPriceSeparationPct: 0.003,
+    minSwingDistance: swingOverrides?.minSwingDistance ?? 5,
+    minPriceSeparationPct: swingOverrides?.minPriceSeparationPct ?? 0.003,
   };
 
   const swingHighs = detectSwingHighs(candles, structConfig);

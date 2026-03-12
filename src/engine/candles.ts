@@ -22,7 +22,7 @@ function seededRng(seed: number): () => number {
 }
 
 // ── Per-symbol base configuration ─────────────────────────────────────────────
-const SYMBOL_CFG: Record<Symbol, { seed: number; basePrice: number; volatility: number }> = {
+const SYMBOL_CFG: Record<string, { seed: number; basePrice: number; volatility: number }> = {
   "XAU/USDT": { seed: 42, basePrice: 5180, volatility: 15 },
   "BTC/USDT": { seed: 77, basePrice: 70000, volatility: 650 },
   "ETH/USDT": { seed: 101, basePrice: 2070, volatility: 40 },
@@ -60,7 +60,7 @@ export function generateCandles(
   timeframe: Timeframe,
   count = 80
 ): CandleData[] {
-  const cfg = SYMBOL_CFG[symbol];
+  const cfg = SYMBOL_CFG[symbol] ?? { seed: 999, basePrice: 100, volatility: 2 };
   const tfMul = TF_SECONDS[timeframe] / 900; // 15M = 1, 1H = 4, 1D = 96
   const rng = seededRng(cfg.seed + tfMul * 13);
 

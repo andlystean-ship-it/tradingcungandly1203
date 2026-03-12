@@ -6,16 +6,19 @@
  * - Detects inter-timeframe conflict (LTF vs HTF divergence)
  * - Penalizes confidence when near pivot (awaiting confirmation)
  * - Considers trendline alignment
- * - Reports conflict level for scenario engine consumption
+ * - Integrates trend pressure into confidence
+ * - Reports full debug metadata for scenario / UI consumption
+ * - Hard neutral gate when conditions are genuinely conflicted
  */
 
-import type { TimeframeSignal, MarketBias, CandleData, Trendline } from "../types";
+import type { TimeframeSignal, MarketBias, BiasDebug, CandleData, Trendline, TrendContext } from "../types";
 import { TF_WEIGHTS } from "./scoring";
 import { calcPivot } from "./pivot";
 
 export type BiasContext = {
   chartCandles?: CandleData[];
   trendlines?: Trendline[];
+  trendContext?: TrendContext;
 };
 
 export function computeBias(
@@ -35,7 +38,6 @@ export function computeBias(
   let bullishPercent = Math.round(bullishFrac * 100);
 
   // ── Conflict detection ─────────────────────────────────────────────────────
-  // Split signals into LTF (15M, 1H, 2H) vs HTF (4H, 6H, 8H, 12H, 1D)
   const ltfSignals = signals.filter(s =>
     s.timeframe === "15M" || s.timeframe === "1H" || s.timeframe === "2H"
   );
@@ -44,64 +46,123 @@ export function computeBias(
     s.timeframe === "12H" || s.timeframe === "1D"
   );
 
-  const ltfAvg = ltfSignals.length > 0
+  const ltfBullishAvg = ltfSignals.length > 0
     ? ltfSignals.reduce((s, sig) => s + sig.bullishScore, 0) / ltfSignals.length
     : 50;
-  const htfAvg = htfSignals.length > 0
+  const htfBullishAvg = htfSignals.length > 0
     ? htfSignals.reduce((s, sig) => s + sig.bullishScore, 0) / htfSignals.length
     : 50;
 
-  // Conflict = LTF and HTF disagree significantly
-  const conflictLevel = Math.abs(ltfAvg - htfAvg);
-  const hasConflict = conflictLevel > 25; // >25 point divergence
+  const conflictLevel = Math.abs(ltfBullishAvg - htfBullishAvg);
+  const hasConflict = conflictLevel > 25;
 
   // ── Confidence calculation ──────────────────────────────────────────────────
-  // Base confidence from deviation from 50/50
   let confidence = Math.round(Math.abs(bullishPercent - 50) * 2);
 
   // Penalty 1: inter-timeframe conflict
+  let conflictPenalty = 0;
   if (hasConflict) {
-    confidence = Math.max(0, confidence - Math.round(conflictLevel * 0.4));
+    conflictPenalty = Math.round(conflictLevel * 0.4);
+    confidence = Math.max(0, confidence - conflictPenalty);
   }
 
-  // Penalty 2: price near pivot (awaiting confirmation)
+  // Penalty 2: price near pivot
+  let pivotProximityPenalty = 0;
   if (context?.chartCandles && context.chartCandles.length >= 2) {
     const levels = calcPivot(context.chartCandles);
     const price = context.chartCandles[context.chartCandles.length - 1].close;
     const pivotRange = Math.abs(levels.r1 - levels.s1) || 1;
     const pivotProximity = Math.abs(price - levels.pivot) / pivotRange;
     if (pivotProximity < 0.1) {
-      // Very close to pivot — heavily penalize confidence
-      confidence = Math.max(0, confidence - 20);
+      pivotProximityPenalty = 20;
     } else if (pivotProximity < 0.25) {
-      confidence = Math.max(0, confidence - 10);
+      pivotProximityPenalty = 10;
     }
+    confidence = Math.max(0, confidence - pivotProximityPenalty);
   }
 
-  // Bonus: trendline alignment
+  // Adjustment 3: trendline alignment
+  let trendlineAdjustment = 0;
   if (context?.trendlines) {
     const activeTrends = context.trendlines.filter(t => t.active);
     const ascActive = activeTrends.filter(t => t.kind === "ascending").length;
     const descActive = activeTrends.filter(t => t.kind === "descending").length;
 
     if (ascActive > 0 && bullishPercent > 50) {
-      confidence = Math.min(100, confidence + 5);
+      trendlineAdjustment = 5;
     } else if (descActive > 0 && bullishPercent < 50) {
-      confidence = Math.min(100, confidence + 5);
+      trendlineAdjustment = 5;
     } else if ((ascActive > 0 && bullishPercent < 45) || (descActive > 0 && bullishPercent > 55)) {
-      // Trendline contradicts bias — penalize
+      trendlineAdjustment = -8;
+    }
+    confidence = Math.max(0, Math.min(100, confidence + trendlineAdjustment));
+  }
+
+  // Adjustment 4: trend pressure integration
+  let trendPressurePenalty = 0;
+  if (context?.trendContext?.pressure) {
+    const tp = context.trendContext.pressure;
+    if ((bullishPercent > 50 && tp.netPressure > 25) ||
+        (bullishPercent < 50 && tp.netPressure < -25)) {
+      confidence = Math.min(100, confidence + 8);
+    }
+    if ((bullishPercent > 55 && tp.netPressure < -15) ||
+        (bullishPercent < 45 && tp.netPressure > 15)) {
+      trendPressurePenalty = 10;
+      confidence = Math.max(0, confidence - trendPressurePenalty);
+    }
+    // Extra penalty: mixed TF alignment with weak momentum → amplify doubt
+    if (context.trendContext.alignment === "mixed" && Math.abs(tp.momentumPressure) < 15) {
+      trendPressurePenalty += 8;
       confidence = Math.max(0, confidence - 8);
     }
+  }
+
+  // Penalty 5: LTF vs HTF on opposite sides of 50 + weak convergence
+  if ((ltfBullishAvg > 55 && htfBullishAvg < 45) || (ltfBullishAvg < 45 && htfBullishAvg > 55)) {
+    confidence = Math.max(0, confidence - 12);
   }
 
   // Clamp
   bullishPercent = Math.max(0, Math.min(100, bullishPercent));
   const bearishPercent = 100 - bullishPercent;
+  confidence = Math.max(0, Math.min(100, confidence));
+
+  // ── Neutral dominance gate ─────────────────────────────────────────────────
+  let dominantSide: "long" | "short" | "neutral";
+  let neutralReason: string | undefined;
+
+  if (confidence < 20) {
+    dominantSide = "neutral";
+    neutralReason = `confidence quá thấp (${confidence}%)`;
+  } else if (bullishPercent >= 47 && bullishPercent <= 53) {
+    dominantSide = "neutral";
+    neutralReason = `bullish/bearish gần bằng nhau (${bullishPercent}/${bearishPercent})`;
+  } else if (hasConflict && conflictLevel > 30 && context?.trendContext?.alignment === "mixed") {
+    dominantSide = "neutral";
+    neutralReason = `LTF/HTF xung đột lớn (${conflictLevel.toFixed(0)}) + trend trái chiều`;
+  } else {
+    dominantSide = bullishPercent > 53 ? "long" : bullishPercent < 47 ? "short" : "neutral";
+    if (dominantSide === "neutral") {
+      neutralReason = "bullish/bearish trong vùng trung lập";
+    }
+  }
+
+  const debug: BiasDebug = {
+    ltfBullishAvg: Math.round(ltfBullishAvg),
+    htfBullishAvg: Math.round(htfBullishAvg),
+    conflictLevel: Math.round(conflictLevel),
+    pivotProximityPenalty,
+    trendPressurePenalty,
+    trendlineAdjustment,
+    neutralReason,
+  };
 
   return {
     bullishPercent,
     bearishPercent,
-    dominantSide: bullishPercent >= 50 ? "long" : "short",
-    confidence: Math.max(0, Math.min(100, confidence)),
+    dominantSide,
+    confidence,
+    debug,
   };
 }

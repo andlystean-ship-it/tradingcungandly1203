@@ -2,13 +2,11 @@
  * trend-context.ts
  * Multi-timeframe trend context layer.
  *
- * Aggregates trendline and swing structure from multiple timeframes
- * into a structured trend summary consumed by the scenario engine.
- *
- * Does NOT render anything — this is pure analysis logic.
+ * Layer direction is determined by strength-weighted scoring, not line counting.
+ * Pressure model uses proximity, momentum, recent breaks/retests, and HTF dominance.
  */
 
-import type { CandleData, Trendline, Timeframe } from "../types";
+import type { CandleData, Trendline, Timeframe, TrendPressure } from "../types";
 import { buildTrendlines } from "./trendlines";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -36,34 +34,44 @@ export type TrendContext = {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+/**
+ * Build a trend layer using strength-weighted scoring, not line counting.
+ * A single strong ascending line outweighs two weak descending ones.
+ */
 function buildLayer(trendlines: Trendline[]): TrendLayer {
   const active = trendlines.filter(t => t.active);
-  const ascending = active.filter(t => t.kind === "ascending");
-  const descending = active.filter(t => t.kind === "descending");
 
-  let direction: TrendDirection = "neutral";
-
-  if (ascending.length > descending.length) {
-    direction = "bullish";
-  } else if (descending.length > ascending.length) {
-    direction = "bearish";
-  } else if (ascending.length > 0 && descending.length > 0) {
-    // Equal count — compare strengths
-    const ascStr = ascending.reduce((s, t) => s + t.strength, 0);
-    const descStr = descending.reduce((s, t) => s + t.strength, 0);
-    if (ascStr > descStr * 1.2) direction = "bullish";
-    else if (descStr > ascStr * 1.2) direction = "bearish";
+  if (active.length === 0) {
+    return { direction: "neutral", activeTrendlines: [], dominantLine: null, strength: 0 };
   }
 
-  const dominant =
-    active.length > 0
-      ? active.reduce((best, t) => (t.strength > best.strength ? t : best))
-      : null;
+  // Strength-weighted directional scoring
+  let ascScore = 0;
+  let descScore = 0;
+  for (const t of active) {
+    const s = t.strength;
+    // Weight by touch count (more touches = more reliable)
+    const touchBonus = Math.min(20, (t.touchCount ?? 1) * 5);
+    // Penalize lines with violations
+    const violationPenalty = Math.min(30, (t.violationCount ?? 0) * 10);
+    const effectiveStrength = Math.max(0, s + touchBonus - violationPenalty);
 
-  const strength =
-    active.length > 0
-      ? Math.round(active.reduce((s, t) => s + t.strength, 0) / active.length)
-      : 0;
+    if (t.kind === "ascending") ascScore += effectiveStrength;
+    else descScore += effectiveStrength;
+  }
+
+  const totalScore = ascScore + descScore || 1;
+  const ascRatio = ascScore / totalScore;
+  const descRatio = descScore / totalScore;
+
+  let direction: TrendDirection = "neutral";
+  // Require >60% dominance to declare directional (not just majority)
+  if (ascRatio > 0.6) direction = "bullish";
+  else if (descRatio > 0.6) direction = "bearish";
+  else if (ascScore > 0 && descScore > 0) direction = "neutral"; // contested
+
+  const dominant = active.reduce((best, t) => (t.strength > best.strength ? t : best));
+  const strength = Math.round(Math.max(ascScore, descScore) / active.length);
 
   return { direction, activeTrendlines: active, dominantLine: dominant, strength };
 }
@@ -81,20 +89,214 @@ function computeAlignment(
   const bullishCount = nonNeutral.filter(d => d === "bullish").length;
   const bearishCount = nonNeutral.filter(d => d === "bearish").length;
 
+  // Require unanimity or strong majority for "aligned"
   if (bullishCount === nonNeutral.length) return "aligned_bullish";
   if (bearishCount === nonNeutral.length) return "aligned_bearish";
   if (bullishCount > 0 && bearishCount > 0) return "mixed";
 
-  // Partial: some directional + some neutral
+  // Partial: some directional + some neutral — only aligned if HTF agrees
+  if (higher.direction === "bullish" && bullishCount > bearishCount) return "aligned_bullish";
+  if (higher.direction === "bearish" && bearishCount > bullishCount) return "aligned_bearish";
   if (bullishCount > bearishCount) return "aligned_bullish";
   if (bearishCount > bullishCount) return "aligned_bearish";
   return "neutral";
 }
 
+// ── Trend pressure calculation ───────────────────────────────────────────────
+
+function computeTrendPressure(
+  candleMap: Partial<Record<Timeframe, CandleData[]>>,
+  allTrendlines: Trendline[],
+  htfLayer: TrendLayer,
+): TrendPressure {
+  const candles1H = candleMap["1H"];
+  if (!candles1H || candles1H.length < 14) {
+    return {
+      netPressure: 0, nearbyLineCount: 0, dominantSource: "insufficient data",
+      htfPressure: 0, nearPricePressure: 0, momentumPressure: 0,
+      dominantPressureDirection: "neutral", pressureStrength: 0,
+      pressureReason: "insufficient data for pressure calculation",
+    };
+  }
+
+  const currentPrice = candles1H[candles1H.length - 1].close;
+  const atr = candles1H.slice(-14).reduce((s, c) => s + (c.high - c.low), 0) / 14;
+  const lastIdx = candles1H.length - 1;
+
+  // ═══ Component 1: Near-price trendline pressure ═══════════════════════════
+  let nearBullish = 0;
+  let nearBearish = 0;
+  let nearbyLineCount = 0;
+  let dominantSource = "none";
+  let maxContrib = 0;
+
+  for (const t of allTrendlines) {
+    if (t.x2 === t.x1) continue;
+
+    const slope = (t.y2 - t.y1) / (t.x2 - t.x1);
+    const projected = t.y1 + slope * (lastIdx - t.x1);
+    const distance = Math.abs(currentPrice - projected);
+    const distanceInATR = atr > 0 ? distance / atr : Infinity;
+
+    if (distanceInATR > 1.5) continue; // tighter radius than before
+    nearbyLineCount++;
+
+    // Proximity: exponential decay — much stronger when very close
+    const proximityFactor = Math.exp(-distanceInATR * 1.5);
+    const touchQuality = Math.min(1.5, 0.5 + (t.touchCount ?? 1) * 0.25);
+    const violationPenalty = 1 - Math.min(0.6, (t.violationCount ?? 0) * 0.15);
+    const contribution = proximityFactor * (t.strength / 100) * touchQuality * violationPenalty * 50;
+
+    if (t.active) {
+      if (t.kind === "ascending") {
+        if (currentPrice > projected) nearBullish += contribution; // support below
+        else nearBearish += contribution * 1.2; // broken support = stronger bearish
+      } else {
+        if (currentPrice < projected) nearBearish += contribution; // resistance above
+        else nearBullish += contribution * 1.2; // broken resistance = stronger bullish
+      }
+    } else if (t.broken) {
+      // Broken lines still exert residual pressure (role reversal)
+      if (t.kind === "ascending") nearBearish += contribution * 0.4; // broken support → resistance
+      else nearBullish += contribution * 0.4; // broken resistance → support
+    }
+
+    if (contribution > maxContrib) {
+      maxContrib = contribution;
+      const tfLabel = t.sourceTimeframe ?? "1H";
+      dominantSource = `${t.kind} ${tfLabel} (${distanceInATR.toFixed(1)} ATR, ${t.touchCount ?? 0} touches)`;
+    }
+  }
+
+  const nearPricePressure = Math.round(Math.max(-100, Math.min(100, nearBullish - nearBearish)));
+
+  // ═══ Component 2: Momentum pressure from candle structure ═════════════════
+  const recentCandles = candles1H.slice(-8);
+  let momentumPressure = 0;
+  if (recentCandles.length >= 4) {
+    let bullBodies = 0;
+    let bearBodies = 0;
+    for (let i = 0; i < recentCandles.length; i++) {
+      const c = recentCandles[i];
+      const bodySize = Math.abs(c.close - c.open);
+      const range = c.high - c.low || 0.0001;
+      const bodyRatio = bodySize / range;
+      const weight = (i + 1) / recentCandles.length; // recent candles weighted more
+      if (c.close > c.open) bullBodies += bodyRatio * weight;
+      else bearBodies += bodyRatio * weight;
+    }
+    const total = bullBodies + bearBodies || 1;
+    momentumPressure = Math.round(((bullBodies - bearBodies) / total) * 60);
+  }
+
+  // ═══ Component 3: HTF dominant trend pressure ═════════════════════════════
+  let htfPressure = 0;
+  if (htfLayer.direction === "bullish") {
+    htfPressure = Math.round(htfLayer.strength * 0.8);
+  } else if (htfLayer.direction === "bearish") {
+    htfPressure = -Math.round(htfLayer.strength * 0.8);
+  }
+  // Boost if HTF dominant line has many touches
+  if (htfLayer.dominantLine && (htfLayer.dominantLine.touchCount ?? 0) >= 3) {
+    htfPressure = Math.round(htfPressure * 1.3);
+  }
+  htfPressure = Math.max(-100, Math.min(100, htfPressure));
+
+  // ═══ Component 4: Recent break / retest detection ═════════════════════════
+  let recentBreak: TrendPressure["recentBreak"];
+  let recentRetest: TrendPressure["recentRetest"];
+  const lookback = candles1H.slice(-7);
+
+  for (const t of allTrendlines) {
+    if (t.x2 === t.x1) continue;
+    const slope = (t.y2 - t.y1) / (t.x2 - t.x1);
+
+    for (let ri = 0; ri < lookback.length - 1; ri++) {
+      const candleIdx = lastIdx - lookback.length + 1 + ri;
+      const projA = t.y1 + slope * (candleIdx - t.x1);
+      const projB = t.y1 + slope * (candleIdx + 1 - t.x1);
+      const priceA = lookback[ri].close;
+      const priceB = lookback[ri + 1].close;
+      const recency = lookback.length - 1 - ri;
+
+      // Break detection
+      if (t.kind === "ascending" && priceA > projA && priceB < projB) {
+        recentBreak = { direction: "bearish", recency };
+      } else if (t.kind === "descending" && priceA < projA && priceB > projB) {
+        recentBreak = { direction: "bullish", recency };
+      }
+
+      // Retest detection: price approached a previously broken level and bounced
+      if (t.broken) {
+        const retestDistance = atr > 0 ? Math.abs(lookback[ri + 1].low - projB) / atr : Infinity;
+        if (retestDistance < 0.3) {
+          if (t.kind === "ascending" && priceB > projB) {
+            // Broken ascending retested from above → role reversal held as support = bullish
+            recentRetest = { direction: "bullish", held: true };
+          } else if (t.kind === "ascending" && priceB < projB) {
+            recentRetest = { direction: "bearish", held: false };
+          } else if (t.kind === "descending" && priceB < projB) {
+            recentRetest = { direction: "bearish", held: true };
+          } else if (t.kind === "descending" && priceB > projB) {
+            recentRetest = { direction: "bullish", held: false };
+          }
+        }
+      }
+    }
+  }
+
+  // Apply break/retest to pressure
+  let breakAdjustment = 0;
+  if (recentBreak) {
+    const recencyFactor = Math.max(0.3, 1 - recentBreak.recency * 0.15);
+    breakAdjustment = recentBreak.direction === "bullish" ? 20 * recencyFactor : -20 * recencyFactor;
+  }
+  if (recentRetest?.held) {
+    breakAdjustment += recentRetest.direction === "bullish" ? 15 : -15;
+  }
+
+  // ═══ Composite: weighted blend ═════════════════════════════════════════════
+  const netPressure = Math.round(Math.max(-100, Math.min(100,
+    nearPricePressure * 0.35 +
+    momentumPressure * 0.20 +
+    htfPressure * 0.30 +
+    breakAdjustment * 0.15
+  )));
+
+  // ═══ Derived summary fields ═══════════════════════════════════════════════
+  const dominantPressureDirection: TrendDirection =
+    netPressure > 15 ? "bullish" : netPressure < -15 ? "bearish" : "neutral";
+  const pressureStrength = Math.abs(netPressure);
+
+  const parts: string[] = [];
+  if (Math.abs(nearPricePressure) > 10) {
+    parts.push(nearPricePressure > 0 ? "near-price support" : "near-price resistance");
+  }
+  if (Math.abs(htfPressure) > 15) {
+    parts.push(htfPressure > 0 ? "HTF bullish trend" : "HTF bearish trend");
+  }
+  if (Math.abs(momentumPressure) > 10) {
+    parts.push(momentumPressure > 0 ? "bullish momentum" : "bearish momentum");
+  }
+  if (recentBreak) {
+    parts.push(`recent ${recentBreak.direction} break`);
+  }
+  if (recentRetest?.held) {
+    parts.push(`${recentRetest.direction} retest held`);
+  }
+  const pressureReason = parts.length > 0 ? parts.join(" + ") : "no dominant pressure";
+
+  return {
+    netPressure, nearbyLineCount, recentBreak, recentRetest, dominantSource,
+    htfPressure, nearPricePressure, momentumPressure,
+    dominantPressureDirection, pressureStrength, pressureReason,
+  };
+}
+
 // ── Main builder ─────────────────────────────────────────────────────────────
 
 export function buildTrendContext(
-  candleMap: Record<Timeframe, CandleData[]>,
+  candleMap: Partial<Record<Timeframe, CandleData[]>>,
   chartTrendlines?: Trendline[]
 ): TrendContext {
   // Short term: 1H trendlines (use provided chart trendlines or rebuild)
@@ -124,5 +326,9 @@ export function buildTrendContext(
 
   const alignment = computeAlignment(shortTerm, mediumTerm, higherTimeframe);
 
-  return { shortTerm, mediumTerm, higherTimeframe, alignment };
+  // Combine all trendlines for pressure calculation
+  const allLines = [...shortTermLines, ...mediumTermLines, ...htfLines];
+  const pressure = computeTrendPressure(candleMap, allLines, higherTimeframe);
+
+  return { shortTerm, mediumTerm, higherTimeframe, alignment, pressure };
 }

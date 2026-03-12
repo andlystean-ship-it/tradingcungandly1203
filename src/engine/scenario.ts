@@ -22,6 +22,7 @@
 
 import type {
   CandleData,
+  CandleMap,
   MarketScenario,
   MarketBias,
   TimeframeSignal,
@@ -32,13 +33,16 @@ import type {
   Trendline,
   TrendContext,
   TrendAlignment,
+  EntryQuality,
 } from "../types";
 import { calcPivot, nearestSupport, nearestResistance } from "./pivot";
 import { detectSwingHighs, detectSwingLows } from "./swings";
+import { ENTRY_QUALITY } from "./score-config";
+import i18n from "../i18n";
+
+const t = (key: string, opts?: Record<string, unknown>) => i18n.t(key, opts);
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-
-type CandleMap = Record<Timeframe, CandleData[]>;
 
 export type ScenarioInput = {
   candleMap: CandleMap;
@@ -187,13 +191,28 @@ function determinePrimarySide(
   marketBias: MarketBias,
   htfSignals: TimeframeSignal[],
   trendContext: TrendContext
-): "long" | "short" {
+): "long" | "short" | "neutral" {
   const htfBullish = htfSignals.filter(s => s.bias === "bullish").length;
   const htfBearish = htfSignals.filter(s => s.bias === "bearish").length;
 
-  // Zone-based default
-  const zoneLong = zone === "bull2" || zone === "bull1" || zone === "trans";
+  // ── Hard neutral gate ──────────────────────────────────────────────────────
+  // If bias is neutral (confidence < 20 or 47–53 bullish%), don't force a side
+  if (marketBias.dominantSide === "neutral") return "neutral";
 
+  // If confidence is low AND trend context is mixed/neutral, stay neutral
+  if (marketBias.confidence < 25 && (trendContext.alignment === "mixed" || trendContext.alignment === "neutral")) {
+    return "neutral";
+  }
+
+  // If HTF is conflicting with local zone AND confidence not strong, stay neutral
+  const zoneLong = zone === "bull2" || zone === "bull1" || zone === "trans";
+  if (marketBias.confidence < 30) {
+    if ((zoneLong && htfBearish > htfBullish) || (!zoneLong && htfBullish > htfBearish)) {
+      return "neutral";
+    }
+  }
+
+  // ── Directional determination (only when confidence is sufficient) ─────────
   // If HTF strongly disagrees with zone, defer to HTF
   if (zoneLong && htfBearish > htfBullish && marketBias.confidence > 30) {
     return "short";
@@ -206,8 +225,11 @@ function determinePrimarySide(
   if (zone === "trans") {
     if (trendContext.alignment === "aligned_bearish" && htfBearish >= htfBullish) return "short";
     if (trendContext.alignment === "aligned_bullish" && htfBullish >= htfBearish) return "long";
+    // Trans zone with no alignment → neutral
+    if (trendContext.alignment === "mixed" || trendContext.alignment === "neutral") return "neutral";
   }
 
+  // Strong directional zone with sufficient confidence
   return zoneLong ? "long" : "short";
 }
 
@@ -217,8 +239,11 @@ function deriveStatus(
   pendingLong: number,
   pendingShort: number,
   invalidationLevel: number,
-  primarySide: "long" | "short"
+  primarySide: "long" | "short" | "neutral"
 ): SignalStatus {
+  // Neutral primary side → always watching
+  if (primarySide === "neutral") return "watching";
+
   const recent = candles.slice(-5);
   if (recent.length < 2) return "watching";
 
@@ -256,9 +281,15 @@ function deriveStatus(
 // ── Scenario state ────────────────────────────────────────────────────────────
 function deriveScenarioState(
   zone: Zone,
-  primarySide: "long" | "short",
+  primarySide: "long" | "short" | "neutral",
   marketBias: MarketBias
 ): ScenarioState {
+  // Neutral primary OR neutral bias → neutral_transition or conflicted
+  if (primarySide === "neutral" || marketBias.dominantSide === "neutral") {
+    if (marketBias.confidence < 10) return "conflicted";
+    return "neutral_transition";
+  }
+
   const zoneIsBullish = zone === "bull2" || zone === "bull1";
   const zoneIsBearish = zone === "bear1" || zone === "bear2";
 
@@ -275,7 +306,7 @@ function deriveScenarioState(
 // ── Build explanation lines from full context ──────────────────────────────────
 function buildExplanationLines(
   zone: Zone,
-  primarySide: "long" | "short",
+  primarySide: "long" | "short" | "neutral",
   marketBias: MarketBias,
   htfSignals: TimeframeSignal[],
   pivot: number,
@@ -285,86 +316,287 @@ function buildExplanationLines(
   invalidationLevel: number,
   status: SignalStatus,
   trendContext: TrendContext,
-  fmt: (n: number) => string
+  fmt: (n: number) => string,
+  entryQuality: EntryQuality,
+  isActionable: boolean,
 ): string[] {
-  const biasDir = marketBias.dominantSide === "long" ? "TĂNG" : "GIẢM";
+  const biasDir = marketBias.dominantSide === "long" ? t("scenario.biasUp") :
+                  marketBias.dominantSide === "short" ? t("scenario.biasDown") : t("scenario.biasNeutral");
   const lines: string[] = [];
 
-  lines.push(
-    `Đa khung: ${biasDir} ${marketBias.bullishPercent}% (confidence ${marketBias.confidence}%) — ` +
-    `HTF ${htfSignals.map(s => `${s.timeframe}:${s.bias === "bullish" ? "↑" : s.bias === "bearish" ? "↓" : "—"}`).join(" ")}`
-  );
+  const htfStr = htfSignals.map(s =>
+    `${s.timeframe}:${s.bias === "bullish" ? "↑" : s.bias === "bearish" ? "↓" : "—"}`
+  ).join(" ");
+  lines.push(t("scenario.mtfLine", {
+    bias: biasDir,
+    bullish: marketBias.bullishPercent,
+    confidence: marketBias.confidence,
+    htf: htfStr,
+  }));
 
-  const zoneVi: Record<Zone, string> = {
-    bull2: "trên R1, xu hướng tăng mạnh",
-    bull1: "trên Pivot, xu hướng tăng",
-    trans: "vùng chuyển tiếp, chờ xác nhận",
-    bear1: "dưới S1, xu hướng giảm",
-    bear2: "dưới S2, áp lực bán lớn",
+  const zoneKeys: Record<Zone, string> = {
+    bull2: "scenario.zoneBull2",
+    bull1: "scenario.zoneBull1",
+    trans: "scenario.zoneTrans",
+    bear1: "scenario.zoneBear1",
+    bear2: "scenario.zoneBear2",
   };
-  lines.push(`Zone: ${zone} — ${zoneVi[zone]}. Pivot ${fmt(pivot)}`);
+  lines.push(t("scenario.zoneLine", {
+    zone,
+    desc: t(zoneKeys[zone]),
+    pivot: fmt(pivot),
+  }));
 
   // ── Trend context line ─────────────────────────────────────────────────────
-  const alignVi: Record<TrendAlignment, string> = {
-    aligned_bullish: "xu hướng đồng thuận TĂNG",
-    aligned_bearish: "xu hướng đồng thuận GIẢM",
-    mixed: "xu hướng trái chiều",
-    neutral: "chưa có xu hướng rõ",
+  const alignKeys: Record<TrendAlignment, string> = {
+    aligned_bullish: "scenario.trendAlignedBull",
+    aligned_bearish: "scenario.trendAlignedBear",
+    mixed: "scenario.trendMixed",
+    neutral: "scenario.trendNeutral",
   };
-  const trendLine = `Trend: ${alignVi[trendContext.alignment]}`;
+  const trendLine = `Trend: ${t(alignKeys[trendContext.alignment])}`;
   const trendParts: string[] = [trendLine];
 
   if (trendContext.shortTerm.dominantLine) {
     const dl = trendContext.shortTerm.dominantLine;
     trendParts.push(
       dl.kind === "ascending"
-        ? "trendline hỗ trợ tăng đang active"
-        : "trendline kháng cự giảm đang active"
+        ? t("scenario.trendSupportAsc")
+        : t("scenario.trendResistDesc")
     );
   }
   if (trendContext.higherTimeframe.direction !== "neutral") {
     trendParts.push(
       trendContext.higherTimeframe.direction === "bullish"
-        ? "HTF trend tăng hỗ trợ"
-        : "HTF trend giảm gây áp lực"
+        ? t("scenario.htfBullSupport")
+        : t("scenario.htfBearPressure")
     );
   }
   lines.push(trendParts.join(" — "));
 
-  if (primarySide === "long") {
-    lines.push(`Kịch bản chính: LONG entry ${fmt(pendingLong)} → target ${fmt(targetPrice)}`);
+  if (primarySide === "neutral") {
+    lines.push(t("scenario.neutralScenario"));
+    if (marketBias.debug?.neutralReason) {
+      lines.push(t("scenario.neutralReason", { reason: marketBias.debug.neutralReason }));
+    }
+    if (trendContext.alignment === "mixed") {
+      lines.push(t("scenario.mixedWarning"));
+    }
+  } else if (primarySide === "long") {
+    if (isActionable) {
+      lines.push(t("scenario.longActionable", { entry: fmt(pendingLong), target: fmt(targetPrice) }));
+    } else {
+      lines.push(t("scenario.longRef", { entry: fmt(pendingLong), quality: entryQuality.qualityScore }));
+    }
     if (trendContext.higherTimeframe.direction === "bearish") {
-      lines.push("⚠ HTF trend giảm — long chỉ mang tính chiến thuật ngắn hạn");
+      lines.push(t("scenario.longHtfWarn"));
     }
   } else {
-    lines.push(`Kịch bản chính: SHORT entry ${fmt(pendingShort)} → target ${fmt(targetPrice)}`);
+    if (isActionable) {
+      lines.push(t("scenario.shortActionable", { entry: fmt(pendingShort), target: fmt(targetPrice) }));
+    } else {
+      lines.push(t("scenario.shortRef", { entry: fmt(pendingShort), quality: entryQuality.qualityScore }));
+    }
     if (trendContext.higherTimeframe.direction === "bullish") {
-      lines.push("⚠ HTF trend tăng — short chỉ mang tính chiến thuật ngắn hạn");
+      lines.push(t("scenario.shortHtfWarn"));
     }
   }
 
-  const statusVi: Record<SignalStatus, string> = {
-    idle: "chờ",
-    watching: "theo dõi",
-    pending_long: "chờ xác nhận LONG",
-    pending_short: "chờ xác nhận SHORT",
-    active_long: "đang LONG",
-    active_short: "đang SHORT",
-    invalidated: "BỊ HỦY",
-    stale: "hết hạn",
+  const statusKeys: Record<SignalStatus, string> = {
+    idle: "scenario.statusIdle",
+    watching: "scenario.statusWatching",
+    pending_long: "scenario.statusPendingLong",
+    pending_short: "scenario.statusPendingShort",
+    active_long: "scenario.statusActiveLong",
+    active_short: "scenario.statusActiveShort",
+    invalidated: "scenario.statusInvalidated",
+    low_quality_setup: "scenario.statusLowQuality",
+    stale: "scenario.statusStale",
   };
-  lines.push(
-    `Invalidation: ${fmt(invalidationLevel)} | Trạng thái: ${statusVi[status]}`
-  );
+  lines.push(t("scenario.invalidationLine", {
+    level: fmt(invalidationLevel),
+    status: t(statusKeys[status]),
+  }));
 
   return lines;
+}
+
+// ── Entry quality assessment (P2) ──────────────────────────────────────────────
+
+function scoreStructureQuality(
+  srCluster: { supports: SRLevel[]; resistances: SRLevel[] },
+  entry: number,
+  primarySide: "long" | "short",
+  atr: number,
+): number {
+  // How strong is the SR level at the entry point?
+  const levels = primarySide === "long" ? srCluster.supports : srCluster.resistances;
+  if (levels.length === 0) return 10;
+
+  // Find closest level to entry
+  let bestMatch = levels[0];
+  let bestDist = Math.abs(levels[0].price - entry);
+  for (const l of levels) {
+    const d = Math.abs(l.price - entry);
+    if (d < bestDist) { bestDist = d; bestMatch = l; }
+  }
+
+  const distanceInATR = atr > 0 ? bestDist / atr : 10;
+  if (distanceInATR > 1.5) return 10; // entry is far from any structure
+
+  // Quality from level strength + number of confluent sources
+  const sourceCount = bestMatch.source.split("+").length;
+  const proximityBonus = Math.max(0, 1 - distanceInATR) * 30;
+  return Math.round(Math.min(100,
+    bestMatch.strength * 0.6 + sourceCount * 10 + proximityBonus
+  ));
+}
+
+function assessEntryQuality(
+  primarySide: "long" | "short",
+  entry: number,
+  target: number,
+  invalidation: number,
+  marketBias: MarketBias,
+  trendContext: TrendContext,
+  htfSignals: TimeframeSignal[],
+  srCluster: { supports: SRLevel[]; resistances: SRLevel[] },
+  atr: number,
+): EntryQuality {
+  const confluenceLabels: string[] = [];
+  const w = ENTRY_QUALITY.factorWeights;
+
+  // ── R:R calculation ────────────────────────────────────────────────────────
+  const risk = Math.abs(entry - invalidation);
+  const reward = Math.abs(target - entry);
+  const rewardRisk = risk > 0 ? reward / risk : 0;
+
+  // ── Factor 1: Structure quality at entry level ────────────────────────────
+  const structureQuality = scoreStructureQuality(srCluster, entry, primarySide, atr);
+  if (structureQuality >= 50) confluenceLabels.push("strong structure");
+
+  // ── Factor 2: Trend alignment ─────────────────────────────────────────────
+  let trendAlignment = 50; // neutral default
+  if ((primarySide === "long" && trendContext.alignment === "aligned_bullish") ||
+      (primarySide === "short" && trendContext.alignment === "aligned_bearish")) {
+    trendAlignment = 90;
+    confluenceLabels.push("trend aligned");
+  } else if (trendContext.alignment === "mixed") {
+    trendAlignment = 25;
+  } else if ((primarySide === "long" && trendContext.alignment === "aligned_bearish") ||
+             (primarySide === "short" && trendContext.alignment === "aligned_bullish")) {
+    trendAlignment = 10;
+  }
+  // Pressure reinforcement
+  if (trendContext.pressure) {
+    const pressureAligned =
+      (primarySide === "long" && trendContext.pressure.netPressure > 20) ||
+      (primarySide === "short" && trendContext.pressure.netPressure < -20);
+    if (pressureAligned) {
+      trendAlignment = Math.min(100, trendAlignment + 15);
+      confluenceLabels.push("pressure supports");
+    }
+  }
+
+  // ── Factor 3: HTF pressure ────────────────────────────────────────────────
+  let htfPressureFactor = 50;
+  const htfBullish = htfSignals.filter(s => s.bias === "bullish").length;
+  const htfBearish = htfSignals.filter(s => s.bias === "bearish").length;
+  const htfTotal = htfSignals.length || 1;
+
+  if (primarySide === "long") {
+    htfPressureFactor = Math.round((htfBullish / htfTotal) * 100);
+  } else {
+    htfPressureFactor = Math.round((htfBearish / htfTotal) * 100);
+  }
+  // Boost from trend pressure HTF component
+  if (trendContext.pressure) {
+    const htfP = trendContext.pressure.htfPressure;
+    if ((primarySide === "long" && htfP > 15) || (primarySide === "short" && htfP < -15)) {
+      htfPressureFactor = Math.min(100, htfPressureFactor + 15);
+      confluenceLabels.push("HTF trend support");
+    }
+  }
+  if (htfPressureFactor >= 60) confluenceLabels.push("HTF majority");
+
+  // ── Factor 4: Distance to invalidation (room to breathe) ─────────────────
+  const riskInATR = atr > 0 ? risk / atr : 0;
+  // 0.5–2.0 ATR is ideal; too tight = bad, too wide = also questionable
+  let distToInv = 50;
+  if (riskInATR >= 0.5 && riskInATR <= 2.5) distToInv = 80;
+  else if (riskInATR < 0.3) distToInv = 15; // too tight, likely to get stopped out
+  else if (riskInATR > 3.5) distToInv = 30; // too wide, large loss on failure
+
+  // ── Factor 5: Distance to target ──────────────────────────────────────────
+  const rewardInATR = atr > 0 ? reward / atr : 0;
+  let distToTarget = 50;
+  if (rewardInATR >= 1.0 && rewardInATR <= 5.0) distToTarget = 80;
+  else if (rewardInATR < 0.5) distToTarget = 20;
+  else if (rewardInATR > 8.0) distToTarget = 30; // unrealistically far
+
+  // ── Factor 6: Reward/Risk score ───────────────────────────────────────────
+  let rrFactor = 0;
+  if (rewardRisk >= 3.0) rrFactor = 100;
+  else if (rewardRisk >= ENTRY_QUALITY.minRewardRisk) rrFactor = Math.round(50 + (rewardRisk - ENTRY_QUALITY.minRewardRisk) * 30);
+  else rrFactor = Math.round(rewardRisk / ENTRY_QUALITY.minRewardRisk * 40);
+
+  if (rewardRisk >= ENTRY_QUALITY.minRewardRisk) {
+    confluenceLabels.push(`R:R ${rewardRisk.toFixed(1)}`);
+  }
+
+  // Bias alignment check
+  if ((primarySide === "long" && marketBias.dominantSide === "long" && marketBias.confidence >= 30) ||
+      (primarySide === "short" && marketBias.dominantSide === "short" && marketBias.confidence >= 30)) {
+    confluenceLabels.push("bias aligned");
+  }
+
+  // ── Composite quality score ───────────────────────────────────────────────
+  const factors = {
+    structureQuality,
+    trendAlignment,
+    htfPressure: htfPressureFactor,
+    distanceToInvalidation: distToInv,
+    distanceToTarget: distToTarget,
+    rewardRisk: rrFactor,
+  };
+
+  const qualityScore = Math.round(Math.min(100,
+    factors.structureQuality * w.structureQuality +
+    factors.trendAlignment * w.trendAlignment +
+    factors.htfPressure * w.htfPressure +
+    factors.distanceToInvalidation * w.distanceToInvalidation +
+    factors.distanceToTarget * w.distanceToTarget +
+    factors.rewardRisk * w.rewardRisk
+  ));
+
+  const confluences = confluenceLabels.length;
+
+  // ── Tradeable gate — stricter than before ─────────────────────────────────
+  let tradeable = true;
+  let rejectReason: string | undefined;
+
+  if (rewardRisk < ENTRY_QUALITY.minRewardRisk) {
+    tradeable = false;
+    rejectReason = `R:R quá thấp (${rewardRisk.toFixed(1)} < ${ENTRY_QUALITY.minRewardRisk})`;
+  } else if (confluences < ENTRY_QUALITY.minConfluences) {
+    tradeable = false;
+    rejectReason = `Chưa đủ confluence (${confluences} < ${ENTRY_QUALITY.minConfluences})`;
+  } else if (qualityScore < ENTRY_QUALITY.minQualityScore) {
+    tradeable = false;
+    rejectReason = `Chất lượng setup thấp (${qualityScore} < ${ENTRY_QUALITY.minQualityScore})`;
+  } else if (structureQuality < ENTRY_QUALITY.minStructureQuality) {
+    tradeable = false;
+    rejectReason = `Cấu trúc S/R yếu tại entry (${structureQuality} < ${ENTRY_QUALITY.minStructureQuality})`;
+  }
+
+  return { tradeable, rewardRisk, confluences, confluenceLabels, qualityScore, rejectReason, factors };
 }
 
 // ── Main scenario builder ─────────────────────────────────────────────────────
 export function buildScenario(input: ScenarioInput): MarketScenario {
   const { candleMap, timeframeSignals, marketBias, chartTrendlines, trendContext, symbol } = input;
 
-  const chartCandles = candleMap["1H"];
+  const chartCandles = candleMap["1H"]!; // 1H must always be present
   const levels1H = calcPivot(chartCandles);
   const { pivot, r1, r2, s1, s2 } = levels1H;
   const currentPrice = chartCandles[chartCandles.length - 1].close;
@@ -376,7 +608,8 @@ export function buildScenario(input: ScenarioInput): MarketScenario {
   );
 
   // HTF pivot levels for level enrichment
-  const levels1D = candleMap["1D"]?.length >= 3 ? calcPivot(candleMap["1D"]) : null;
+  const candles1D = candleMap["1D"];
+  const levels1D = candles1D && candles1D.length >= 3 ? calcPivot(candles1D) : null;
 
   // ── Build SR cluster from all sources ────────────────────────────────────────
   const srCluster = buildSRCluster(candleMap, chartTrendlines, currentPrice);
@@ -386,6 +619,14 @@ export function buildScenario(input: ScenarioInput): MarketScenario {
 
   // ── Primary side from MTF consensus (not just zone) ──────────────────────────
   const primarySide = determinePrimarySide(zone, marketBias, htfSignals, trendContext);
+
+  // "lean" direction for level computation when primary is neutral
+  const leanDirection: "long" | "short" = (() => {
+    if (primarySide !== "neutral") return primarySide;
+    // When neutral: use zone lean for level placement only
+    const zoneLong = zone === "bull2" || zone === "bull1" || zone === "trans";
+    return zoneLong ? "long" : "short";
+  })();
 
   // ── Role-based level selection ───────────────────────────────────────────────
   const minGap = currentPrice * 0.003;
@@ -399,7 +640,7 @@ export function buildScenario(input: ScenarioInput): MarketScenario {
   let targetReason: string;
   let invReason: string;
 
-  if (primarySide === "long") {
+  if (leanDirection === "long") {
     const bestSupport = srCluster.supports[0];
     pendingLong = bestSupport ? bestSupport.price : nearestSupport(levels1H, currentPrice);
     longReason = bestSupport ? `SR cluster: ${bestSupport.source}` : "fallback pivot S/R";
@@ -438,7 +679,7 @@ export function buildScenario(input: ScenarioInput): MarketScenario {
   }
 
   // ── Uniqueness guard ──────────────────────────────────────────────────────────
-  if (primarySide === "long") {
+  if (leanDirection === "long") {
     targetPrice = Math.max(targetPrice, pendingLong + minGap * 3);
     pendingShort = Math.max(pendingShort, targetPrice + minGap * 3);
     invalidationLevel = Math.min(invalidationLevel, pendingLong - minGap * 2);
@@ -460,10 +701,54 @@ export function buildScenario(input: ScenarioInput): MarketScenario {
   invalidationLevel = fix(invalidationLevel);
 
   // ── Confirmation-based status ──────────────────────────────────────────────
-  const status = deriveStatus(chartCandles, pendingLong, pendingShort, invalidationLevel, primarySide);
+  let status = deriveStatus(chartCandles, pendingLong, pendingShort, invalidationLevel, primarySide);
+
+  // ── Entry quality gate — assess BOTH sides ────────────────────────────────
+  const atr = approxATR(chartCandles);
+  const longQuality = assessEntryQuality(
+    "long", pendingLong, targetPrice, invalidationLevel,
+    marketBias, trendContext, htfSignals, srCluster, atr,
+  );
+  const shortQuality = assessEntryQuality(
+    "short", pendingShort, targetPrice, invalidationLevel,
+    marketBias, trendContext, htfSignals, srCluster, atr,
+  );
+  const entryQuality = leanDirection === "long" ? longQuality : shortQuality;
+  const alternateEntryQuality = leanDirection === "long" ? shortQuality : longQuality;
+
+  // Downgrade pending → low_quality_setup if entry quality fails gate
+  if (!entryQuality.tradeable && (status === "pending_long" || status === "pending_short")) {
+    status = "low_quality_setup";
+  }
+
+  // Neutral primary → force watching regardless
+  if (primarySide === "neutral" && status !== "invalidated") {
+    status = "watching";
+  }
+
+  // ── Actionability determination ───────────────────────────────────────────
+  const primaryScenarioIsActionable = primarySide !== "neutral" && entryQuality.tradeable;
+  let primaryRejectReason: string | undefined;
+  if (!primaryScenarioIsActionable) {
+    if (primarySide === "neutral") {
+      primaryRejectReason = `Thị trường trung lập — confidence ${marketBias.confidence}%`;
+      if (marketBias.debug?.neutralReason) {
+        primaryRejectReason += ` (${marketBias.debug.neutralReason})`;
+      }
+    } else if (entryQuality.rejectReason) {
+      primaryRejectReason = entryQuality.rejectReason;
+    } else {
+      primaryRejectReason = "Chưa đủ điều kiện chất lượng";
+    }
+  }
 
   // ── Scenario state from MTF context ──────────────────────────────────────
-  const scenarioState = deriveScenarioState(zone, primarySide, marketBias);
+  let scenarioState = deriveScenarioState(zone, primarySide, marketBias);
+
+  // Overlay low_quality_setup state when primary is directional but too weak
+  if (primarySide !== "neutral" && !entryQuality.tradeable && scenarioState !== "conflicted") {
+    scenarioState = "low_quality_setup";
+  }
 
   const fmt = (n: number) => n.toFixed(2);
 
@@ -471,51 +756,63 @@ export function buildScenario(input: ScenarioInput): MarketScenario {
   const explanationLines = buildExplanationLines(
     zone, primarySide, marketBias, htfSignals,
     pivot, targetPrice, pendingLong, pendingShort, invalidationLevel,
-    status, trendContext, fmt
+    status, trendContext, fmt, entryQuality, primaryScenarioIsActionable
   );
 
   // ── Primary + alternate scenarios ──────────────────────────────────────────
-  const primaryScenario = {
-    side: primarySide,
-    trigger: primarySide === "long" ? pendingLong : pendingShort,
-    target: targetPrice,
-    rationale: primarySide === "long"
-      ? `Long từ ${fmt(pendingLong)} → target ${fmt(targetPrice)}, inv ${fmt(invalidationLevel)}`
-      : `Short từ ${fmt(pendingShort)} → target ${fmt(targetPrice)}, inv ${fmt(invalidationLevel)}`,
-  };
+  const primaryScenario: { side: "long" | "short" | "neutral"; trigger: number; target: number; rationale: string } = primarySide === "neutral"
+    ? {
+        side: "neutral",
+        trigger: leanDirection === "long" ? pendingLong : pendingShort,
+        target: targetPrice,
+        rationale: `Chưa đủ điều kiện — chờ xác nhận bias (confidence ${marketBias.confidence}%)`,
+      }
+    : {
+        side: primarySide,
+        trigger: primarySide === "long" ? pendingLong : pendingShort,
+        target: targetPrice,
+        rationale: primarySide === "long"
+          ? t("scenario.longRationale", { entry: fmt(pendingLong), target: fmt(targetPrice), inv: fmt(invalidationLevel) })
+          : t("scenario.shortRationale", { entry: fmt(pendingShort), target: fmt(targetPrice), inv: fmt(invalidationLevel) }),
+      };
 
-  const alternateSide: "long" | "short" = primarySide === "long" ? "short" : "long";
+  const alternateSide: "long" | "short" = leanDirection === "long" ? "short" : "long";
   const alternateScenario = {
     side: alternateSide,
     trigger: alternateSide === "short" ? pendingShort : pendingLong,
     target: alternateSide === "short" ? pendingLong : pendingShort,
     rationale: alternateSide === "short"
-      ? `Alternate Short nếu giá bác ${fmt(pendingShort)} — không phải kịch bản chính`
-      : `Alternate Long nếu giá về ${fmt(pendingLong)} và xác nhận hỗ trợ`,
+      ? t("scenario.altShort", { trigger: fmt(pendingShort) })
+      : t("scenario.altLong", { trigger: fmt(pendingLong) }),
   };
 
   // ── Caution text ──────────────────────────────────────────────────────────
   let cautionText: string | undefined;
   const rangeSpan = r1 - s1 || 1;
   if (Math.abs(currentPrice - pivot) < rangeSpan * 0.06) {
-    cautionText = "Giá sát Pivot — chờ xác nhận phá vỡ trước khi entry";
+    cautionText = t("scenario.cautionPivot");
   }
   if (scenarioState === "conflicted") {
     cautionText = (cautionText ? cautionText + ". " : "") +
-      "⚠ LTF và HTF đang xung đột — giảm size hoặc chờ confluence";
+      t("scenario.cautionConflict");
   }
   // Trend alignment caution
   if (trendContext.alignment === "mixed") {
     cautionText = (cautionText ? cautionText + ". " : "") +
-      "⚠ Xu hướng trái chiều giữa các khung — confidence giảm";
+      t("scenario.cautionMixed");
   }
   if (primarySide === "long" && trendContext.higherTimeframe.direction === "bearish") {
     cautionText = (cautionText ? cautionText + ". " : "") +
-      "HTF trend giảm — kịch bản long chỉ mang tính chiến thuật";
+      t("scenario.cautionLongHtf");
   }
   if (primarySide === "short" && trendContext.higherTimeframe.direction === "bullish") {
     cautionText = (cautionText ? cautionText + ". " : "") +
-      "HTF trend tăng — kịch bản short chỉ mang tính chiến thuật";
+      t("scenario.cautionShortHtf");
+  }
+  // Entry quality caution (P2)
+  if (!entryQuality.tradeable && entryQuality.rejectReason) {
+    cautionText = (cautionText ? cautionText + ". " : "") +
+      t("scenario.cautionQuality", { reason: entryQuality.rejectReason });
   }
 
   return {
@@ -542,5 +839,9 @@ export function buildScenario(input: ScenarioInput): MarketScenario {
     targetReason,
     invalidationReason: invReason,
     zone,
+    entryQuality,
+    alternateQuality: alternateEntryQuality,
+    primaryScenarioIsActionable,
+    primaryRejectReason,
   };
 }

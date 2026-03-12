@@ -20,8 +20,7 @@
  *   ...  (ignored)
  */
 
-import type { CandleData, Symbol, Timeframe } from "../types";
-import { generateCandles } from "./candles";
+import type { CandleData, CandleMap, Symbol, Timeframe, TimeframeStatus, SourceMode } from "../types";
 import { FETCH_COUNTS } from "./windows";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -33,7 +32,7 @@ const FETCH_TIMEOUT_MS = 8000;
 // XAU uses PAXGUSDT (Pax Gold, 1:1 gold-backed token on Binance spot).
 // True XAUUSD spot would require a forex/metals API (e.g., MetalpriceAPI).
 // TODO: If a metals API provider is added, route XAU through it instead.
-const BINANCE_SYMBOL: Record<Symbol, string> = {
+const BINANCE_SYMBOL: Record<string, string> = {
   "XAU/USDT": "PAXGUSDT",
   "BTC/USDT": "BTCUSDT",
   "ETH/USDT": "ETHUSDT",
@@ -47,6 +46,44 @@ const BINANCE_SYMBOL: Record<Symbol, string> = {
   "LINK/USDT": "LINKUSDT",
   "SUI/USDT": "SUIUSDT",
 };
+
+/** Resolve symbol → Binance pair. Falls back to stripping "/" for dynamic symbols. */
+function toBinancePair(symbol: Symbol): string {
+  return BINANCE_SYMBOL[symbol] ?? symbol.replace("/", "");
+}
+
+// ── Provider info — honest labeling about what data we actually show ──────────
+export type ProviderInfo = {
+  provider: string;
+  actualPair: string;
+  proxyWarning?: string;
+};
+
+const PROVIDER_INFO: Record<string, ProviderInfo> = {
+  "XAU/USDT": {
+    provider: "Binance PAXG proxy",
+    actualPair: "PAXGUSDT",
+    proxyWarning: "This is Pax Gold (PAXG), not true XAU spot. Prices may deviate from London spot gold.",
+  },
+  "BTC/USDT": { provider: "Binance Spot", actualPair: "BTCUSDT" },
+  "ETH/USDT": { provider: "Binance Spot", actualPair: "ETHUSDT" },
+  "SOL/USDT": { provider: "Binance Spot", actualPair: "SOLUSDT" },
+  "BNB/USDT": { provider: "Binance Spot", actualPair: "BNBUSDT" },
+  "XRP/USDT": { provider: "Binance Spot", actualPair: "XRPUSDT" },
+  "ADA/USDT": { provider: "Binance Spot", actualPair: "ADAUSDT" },
+  "DOGE/USDT": { provider: "Binance Spot", actualPair: "DOGEUSDT" },
+  "DOT/USDT": { provider: "Binance Spot", actualPair: "DOTUSDT" },
+  "AVAX/USDT": { provider: "Binance Spot", actualPair: "AVAXUSDT" },
+  "LINK/USDT": { provider: "Binance Spot", actualPair: "LINKUSDT" },
+  "SUI/USDT": { provider: "Binance Spot", actualPair: "SUIUSDT" },
+};
+
+export function getProviderInfo(symbol: Symbol): ProviderInfo {
+  return PROVIDER_INFO[symbol] ?? {
+    provider: "Binance Spot",
+    actualPair: toBinancePair(symbol),
+  };
+}
 
 // ── Timeframe → Binance interval ──────────────────────────────────────────────
 const BINANCE_INTERVAL: Record<Timeframe, string> = {
@@ -106,7 +143,7 @@ export async function fetchBinanceCandles(
   timeframe: Timeframe,
   count = FETCH_COUNTS[timeframe]
 ): Promise<CandleData[]> {
-  const pair = BINANCE_SYMBOL[symbol];
+  const pair = toBinancePair(symbol);
   const interval = BINANCE_INTERVAL[timeframe];
   const url = `${BINANCE_BASE}/klines?symbol=${pair}&interval=${interval}&limit=${count}`;
 
@@ -122,51 +159,93 @@ export async function fetchBinanceCandles(
   return candles;
 }
 
-export type CandleMap = Record<Timeframe, CandleData[]>;
 export type FetchResult = {
   candleMap: CandleMap;
-  source: "live" | "demo";
+  source: "live" | "partial";
+  /** Granular source classification */
+  sourceMode: SourceMode;
   warning?: string;
+  /** Per-timeframe fetch status */
+  perTimeframe: Record<Timeframe, TimeframeStatus>;
+  /** How many TFs fetched live */
+  liveTfCount: number;
+  totalTfCount: number;
+  /** Provider info for honest labeling */
+  providerInfo: ProviderInfo;
+  /** Timeframe completeness 0–100 */
+  timeframeCompleteness: number;
+  /** TFs that failed and are missing from candleMap */
+  missingTimeframes: Timeframe[];
 };
+
+const ALL_TIMEFRAMES: Timeframe[] = [
+  "15M", "1H", "2H", "4H", "6H", "8H", "12H", "1D",
+];
 
 /**
  * Fetch a complete multi-timeframe candle map for a symbol.
  *
  * Strategy:
  * - Try all timeframes concurrently from Binance.
+ * - Per-TF: if fetch succeeds → "live", if fetch fails → "failed" (excluded from candleMap)
  * - If ALL succeed → source = "live"
- * - If ANY fail → fall back to fully demo (for consistency: mixing live and
- *   generated candles across timeframes would produce misleading signals).
+ * - If SOME succeed → source = "partial" (missing TFs excluded, clearly labeled)
+ * - If ALL fail → throws (useEngine keeps last-good-snapshot)
+ *
+ * Failed TFs are NOT replaced with generated candles.
+ * The engine pipeline must tolerate missing TFs.
  */
 export async function fetchCandleMap(symbol: Symbol): Promise<FetchResult> {
-  const timeframes: Timeframe[] = [
-    "15M",
-    "1H",
-    "2H",
-    "4H",
-    "6H",
-    "8H",
-    "12H",
-    "1D",
-  ];
+  const perTimeframe = {} as Record<Timeframe, TimeframeStatus>;
+  const candleMap = {} as CandleMap;
+  const warnings: string[] = [];
+  const missingTimeframes: Timeframe[] = [];
+  let liveTfCount = 0;
 
-  try {
-    const results = await Promise.all(
-      timeframes.map((tf) => fetchBinanceCandles(symbol, tf, FETCH_COUNTS[tf]))
-    );
-    const candleMap = {} as CandleMap;
-    timeframes.forEach((tf, i) => {
-      candleMap[tf] = results[i];
-    });
-    return { candleMap, source: "live" };
-  } catch (err) {
-    // Network unavailable or symbol not found — fall back to demo
-    const candleMap = {} as CandleMap;
-    const warning =
-      err instanceof Error ? err.message : "Binance unavailable — demo mode";
-    for (const tf of timeframes) {
-      candleMap[tf] = generateCandles(symbol, tf, FETCH_COUNTS[tf]);
+  const settled = await Promise.allSettled(
+    ALL_TIMEFRAMES.map(async (tf) => {
+      const candles = await fetchBinanceCandles(symbol, tf, FETCH_COUNTS[tf]);
+      return { tf, candles };
+    })
+  );
+
+  for (const result of settled) {
+    if (result.status === "fulfilled") {
+      const { tf, candles } = result.value;
+      candleMap[tf] = candles;
+      perTimeframe[tf] = "live";
+      liveTfCount++;
+    } else {
+      const idx = settled.indexOf(result);
+      const tf = ALL_TIMEFRAMES[idx];
+      const errMsg = result.reason instanceof Error ? result.reason.message : String(result.reason);
+      warnings.push(`${tf}: ${errMsg}`);
+      perTimeframe[tf] = "failed";
+      missingTimeframes.push(tf);
+      // No generated fallback — TF is excluded from candleMap
     }
-    return { candleMap, source: "demo", warning };
   }
+
+  const totalTfCount = ALL_TIMEFRAMES.length;
+  const timeframeCompleteness = Math.round((liveTfCount / totalTfCount) * 100);
+  let source: "live" | "partial";
+  let warning: string | undefined;
+
+  if (liveTfCount === totalTfCount) {
+    source = "live";
+  } else if (liveTfCount === 0) {
+    throw new Error(`All ${totalTfCount} timeframes failed. ${warnings.join("; ")}`);
+  } else {
+    source = "partial";
+    warning = `${liveTfCount}/${totalTfCount} TFs live. Missing: ${missingTimeframes.join(", ")}. ${warnings.join("; ")}`;
+  }
+
+  const providerInfo = getProviderInfo(symbol);
+  const sourceMode: SourceMode = providerInfo.proxyWarning ? "proxy" : source === "live" ? "live" : "partial";
+
+  return {
+    candleMap, source, sourceMode, warning, perTimeframe,
+    liveTfCount, totalTfCount, providerInfo,
+    timeframeCompleteness, missingTimeframes,
+  };
 }

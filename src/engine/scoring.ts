@@ -16,10 +16,11 @@
  * bullishLevel / bearishLevel from confirmed swing structure per TF.
  */
 
-import type { CandleData, Timeframe, TimeframeSignal, Bias, Trendline } from "../types";
+import type { CandleData, Timeframe, TimeframeSignal, Bias, Trendline, LevelMeta } from "../types";
 import { calcPivot, nearestSupport, nearestResistance } from "./pivot";
 import { detectSwingHighs, detectSwingLows } from "./swings";
 import { buildTrendlines } from "./trendlines";
+import { DEFAULT_WEIGHTS, BIAS_THRESHOLDS, type ScoreBreakdown } from "./score-config";
 
 /** Timeframe weight for global bias aggregation (higher = more influential) */
 export const TF_WEIGHTS: Record<Timeframe, number> = {
@@ -247,20 +248,37 @@ export function scoreTimeframe(
   const s_volatility   = scoreVolatility(candles);
   const s_htf          = scoreHTFAlignment(timeframe, htfContext);
 
-  // ── Weighted combination ──────────────────────────────────────────────────
+  // ── Weighted combination (from centralized config) ──────────────────────────
+  const w = DEFAULT_WEIGHTS;
   const rawScore =
-    s_position     * 0.20 +
-    s_pivotReclaim * 0.15 +
-    s_momentum     * 0.15 +
-    s_support      * 0.10 +
-    s_resistance   * 0.10 +
-    s_trendline    * 0.10 +
-    s_breakRetest  * 0.10 +
-    s_volatility   * 0.05 +
-    s_htf          * 0.05;
+    s_position     * w.position +
+    s_pivotReclaim * w.pivotReclaim +
+    s_momentum     * w.momentum +
+    s_support      * w.support +
+    s_resistance   * w.resistance +
+    s_trendline    * w.trendline +
+    s_breakRetest  * w.breakRetest +
+    s_volatility   * w.volatility +
+    s_htf          * w.htfAlignment;
 
   const score = Math.round(Math.max(0, Math.min(100, rawScore)));
-  const bias: Bias = score > 55 ? "bullish" : score < 45 ? "bearish" : "neutral";
+  const bias: Bias = score > BIAS_THRESHOLDS.bullish ? "bullish"
+    : score < BIAS_THRESHOLDS.bearish ? "bearish"
+    : "neutral";
+
+  // ── Score breakdown for audit ─────────────────────────────────────────────
+  const scoreBreakdown: ScoreBreakdown = {
+    position: Math.round(s_position),
+    pivotReclaim: Math.round(s_pivotReclaim),
+    momentum: Math.round(s_momentum),
+    support: Math.round(s_support),
+    resistance: Math.round(s_resistance),
+    trendline: Math.round(s_trendline),
+    breakRetest: Math.round(s_breakRetest),
+    volatility: Math.round(s_volatility),
+    htfAlignment: Math.round(s_htf),
+    total: score,
+  };
 
   // ── Swing-based bullish / bearish levels ────────────────────────────────────
   const avgBarRange =
@@ -276,15 +294,32 @@ export function scoreTimeframe(
     .filter((sl) => sl.price < currentPrice && sl.price >= currentPrice - searchWindow)
     .sort((a, b) => b.price - a.price);
 
-  const bullishLevel =
-    swingHighsAbove.length > 0
-      ? swingHighsAbove[0].price
-      : nearestResistance(levels, currentPrice);
+  const usedSwingHigh = swingHighsAbove.length > 0;
+  const bullishLevel = usedSwingHigh
+    ? swingHighsAbove[0].price
+    : nearestResistance(levels, currentPrice);
 
-  const bearishLevel =
-    swingLowsBelow.length > 0
-      ? swingLowsBelow[0].price
-      : nearestSupport(levels, currentPrice);
+  const usedSwingLow = swingLowsBelow.length > 0;
+  const bearishLevel = usedSwingLow
+    ? swingLowsBelow[0].price
+    : nearestSupport(levels, currentPrice);
+
+  // ── Level selection metadata ──────────────────────────────────────────────
+  const bullishLevelMeta: LevelMeta = {
+    selectedFrom: usedSwingHigh ? `swing-${timeframe}` : `pivot-${timeframe}`,
+    selectionReason: usedSwingHigh
+      ? `nearest swing high within ${searchWindow.toFixed(0)} range`
+      : "fallback to pivot resistance (no nearby swing high)",
+    levelQuality: usedSwingHigh ? Math.min(100, 50 + TF_WEIGHTS[timeframe] * 8) : 30,
+  };
+
+  const bearishLevelMeta: LevelMeta = {
+    selectedFrom: usedSwingLow ? `swing-${timeframe}` : `pivot-${timeframe}`,
+    selectionReason: usedSwingLow
+      ? `nearest swing low within ${searchWindow.toFixed(0)} range`
+      : "fallback to pivot support (no nearby swing low)",
+    levelQuality: usedSwingLow ? Math.min(100, 50 + TF_WEIGHTS[timeframe] * 8) : 30,
+  };
 
   return {
     timeframe,
@@ -294,5 +329,8 @@ export function scoreTimeframe(
     bearishScore: 100 - score,
     bias,
     strength: TF_WEIGHTS[timeframe],
+    scoreBreakdown,
+    bullishLevelMeta,
+    bearishLevelMeta,
   };
 }

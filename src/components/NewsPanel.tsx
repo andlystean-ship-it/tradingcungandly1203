@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import type { NewsItem, Symbol } from "../types";
 
 type Props = {
@@ -5,20 +6,15 @@ type Props = {
   symbol: Symbol;
 };
 
-const SENTIMENT_LABELS: Record<string, string> = {
-  bullish: "Tích cực",
-  bearish: "Tiêu cực",
-  neutral: "Trung tính",
-};
-
 export default function NewsPanel({ news, symbol }: Props) {
+  const { t } = useTranslation();
   const coinName = symbol === "XAU/USDT" ? "XAU" : "BTC";
 
   return (
-    <div className="news-panel">
+    <div className="news-panel" role="region" aria-label={t("news.title")}>
       <div className="news-header">
-        <div className="news-title">Tin tức &amp; Sentiment — {coinName}</div>
-        <div className="news-badge">{news.length} tin</div>
+        <div className="news-title">{t("news.title")} — {coinName}</div>
+        <div className="news-badge">{t("news.count", { count: news.length })}</div>
       </div>
 
       <div className="news-list">
@@ -43,10 +39,10 @@ export default function NewsPanel({ news, symbol }: Props) {
 
               <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
                 <div className={`news-sentiment ${item.sentimentLabel}`}>
-                  {SENTIMENT_LABELS[item.sentimentLabel]} ({item.sentimentScore}%)
+                  {t(`news.${item.sentimentLabel}`)} ({item.sentimentScore}%)
                 </div>
                 {item.hasTargetPrice && (
-                  <button className="news-cta">Có Mục Tiêu Giá</button>
+                  <button className="news-cta">{t("news.hasTarget")}</button>
                 )}
               </div>
             </div>

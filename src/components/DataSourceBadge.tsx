@@ -1,14 +1,18 @@
 /**
  * DataSourceBadge.tsx
- * Shows whether the engine is running on live Binance data or demo candles,
+ * Shows whether the engine is running on live Binance data,
  * plus a loading pulse and last-updated time.
  */
 
+import { useTranslation } from "react-i18next";
+
 type Props = {
-  source: "live" | "demo" | "stale" | "error";
+  source: "live" | "stale" | "error" | "partial";
   loading: boolean;
   lastUpdated: string;
   warning?: string;
+  provider?: string;
+  proxyWarning?: string;
 };
 
 function formatTime(iso: string): string {
@@ -28,27 +32,41 @@ export default function DataSourceBadge({
   loading,
   lastUpdated,
   warning,
+  provider,
+  proxyWarning,
 }: Props) {
-  const isLive = source === "live";
+  const { t } = useTranslation();
+  const isLive = source === "live" || source === "partial";
+
+  const sourceLabel = isLive
+    ? `${t("dataSource.live")} — ${provider ?? "Binance"}`
+    : t("dataSource.offline");
 
   return (
-    <div className="data-source-bar">
+    <div className="data-source-bar" role="status" aria-live="polite">
       <div className="data-source-left">
         <span
-          className={`source-dot ${isLive ? "live" : "demo"} ${loading ? "pulse" : ""}`}
+          className={`source-dot ${isLive ? "live" : "offline"} ${loading ? "pulse" : ""}`}
+          aria-hidden="true"
         />
-        <span className={`source-label ${isLive ? "live" : "demo"}`}>
-          {isLive ? "LIVE — Binance" : "DEMO — Generated"}
+        <span className={`source-label ${isLive ? "live" : "offline"}`}>
+          {sourceLabel}
         </span>
+        {source === "partial" && (
+          <span className="source-partial"> {t("dataSource.partial")}</span>
+        )}
       </div>
 
       <div className="data-source-right">
         {loading && (
-          <span className="source-fetching">↻ đang làm mới…</span>
+          <span className="source-fetching">{t("dataSource.refreshing")}</span>
         )}
-        <span className="source-time">Cập nhật: {formatTime(lastUpdated)}</span>
+        <span className="source-time">{t("dataSource.updatedAt")}: {formatTime(lastUpdated)}</span>
       </div>
 
+      {proxyWarning && (
+        <div className="source-warning source-proxy-warning">⚠ {proxyWarning}</div>
+      )}
       {warning && !isLive && (
         <div className="source-warning">{warning}</div>
       )}

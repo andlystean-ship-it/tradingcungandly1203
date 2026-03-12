@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import {
   createChart,
   ColorType,
@@ -15,6 +16,7 @@ type CandleMap = Record<Timeframe, CandleData[]>;
 type Props = {
   candleMap: CandleMap;
   scenario: MarketScenario;
+  theme?: "dark" | "light";
 };
 
 const TIMEFRAMES: Timeframe[] = ["15M", "1H", "2H", "4H", "6H", "8H", "12H", "1D"];
@@ -22,54 +24,83 @@ const TIMEFRAMES: Timeframe[] = ["15M", "1H", "2H", "4H", "6H", "8H", "12H", "1D
 const UP_COLOR = "#26a69a";
 const DN_COLOR = "#ef5350";
 
+function getChartColors(theme: "dark" | "light") {
+  if (theme === "light") {
+    return {
+      bg: "#f5f7fa",
+      text: "#333",
+      gridV: "rgba(200,200,200,0.4)",
+      gridH: "rgba(200,200,200,0.6)",
+      crosshair: "rgba(100,100,100,0.3)",
+      crosshairLabel: "#e0e0e0",
+      border: "#ccc",
+      watermark: "rgba(150,150,150,0.08)",
+    };
+  }
+  return {
+    bg: "#0a130e",
+    text: "#5a9a6a",
+    gridV: "rgba(28,78,36,0.35)",
+    gridH: "rgba(28,78,36,0.55)",
+    crosshair: "rgba(0,229,255,0.3)",
+    crosshairLabel: "#1e4025",
+    border: "#1e4025",
+    watermark: "rgba(35,110,45,0.08)",
+  };
+}
+
 /** Extrapolate trendline to a target candle index */
 function extrapolatePrice(t: Trendline, targetIdx: number): number {
   if (t.x2 === t.x1) return t.y1;
   return t.y1 + ((t.y2 - t.y1) / (t.x2 - t.x1)) * (targetIdx - t.x1);
 }
 
-export default function MainChart({ candleMap, scenario }: Props) {
+export default function MainChart({ candleMap, scenario, theme = "dark" }: Props) {
+  const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const priceLinesRef = useRef<IPriceLine[]>([]);
   const trendlineSeriesRef = useRef<ISeriesApi<"Line">[]>([]);
   const [selectedTf, setSelectedTf] = useState<Timeframe>("1H");
+  const [showTrendlines, setShowTrendlines] = useState(true);
+  const [showExplanation, setShowExplanation] = useState(true);
 
   // ── Create chart once ────────────────────────────────────────────────────────
   useEffect(() => {
     if (!containerRef.current) return;
+    const c = getChartColors(theme);
 
     const chart = createChart(containerRef.current, {
       layout: {
-        background: { type: ColorType.Solid, color: "#0a130e" },
-        textColor: "#5a9a6a",
+        background: { type: ColorType.Solid, color: c.bg },
+        textColor: c.text,
         fontFamily: "'SF Mono', 'Fira Code', monospace",
       },
       grid: {
-        vertLines: { color: "rgba(28,78,36,0.35)" },
-        horzLines: { color: "rgba(28,78,36,0.55)" },
+        vertLines: { color: c.gridV },
+        horzLines: { color: c.gridH },
       },
       width: containerRef.current.clientWidth,
       height: 420,
       crosshair: {
         mode: CrosshairMode.Normal,
-        vertLine: { color: "rgba(0,229,255,0.3)", labelBackgroundColor: "#1e4025" },
-        horzLine: { color: "rgba(0,229,255,0.3)", labelBackgroundColor: "#1e4025" },
+        vertLine: { color: c.crosshair, labelBackgroundColor: c.crosshairLabel },
+        horzLine: { color: c.crosshair, labelBackgroundColor: c.crosshairLabel },
       },
       rightPriceScale: {
-        borderColor: "#1e4025",
+        borderColor: c.border,
         scaleMargins: { top: 0.05, bottom: 0.05 },
       },
       timeScale: {
-        borderColor: "#1e4025",
+        borderColor: c.border,
         timeVisible: true,
         secondsVisible: false,
       },
       watermark: {
         visible: true,
         text: "Crypto and Forex Trading",
-        color: "rgba(35,110,45,0.08)",
+        color: c.watermark,
         fontSize: 24,
       },
     });
@@ -101,7 +132,7 @@ export default function MainChart({ candleMap, scenario }: Props) {
       priceLinesRef.current = [];
       trendlineSeriesRef.current = [];
     };
-  }, []);
+  }, [theme]);
 
   // ── Update candle data, price lines & trendlines ────────────────────────────
   const updateChart = useCallback(() => {
@@ -157,8 +188,9 @@ export default function MainChart({ candleMap, scenario }: Props) {
     }
 
     // ── Draw trendlines ────────────────────────────────────────────
-    const activeTrendlines = scenario.trendlines.filter((t) => t.active);
-    for (const t of activeTrendlines.slice(0, 5)) {
+    if (showTrendlines) {
+      const activeTrendlines = scenario.trendlines.filter((t) => t.active);
+      for (const t of activeTrendlines.slice(0, 5)) {
       // Extrapolate trendline from x1 to end of visible candles
       const startIdx = Math.max(0, t.x1);
       const endIdx = Math.min(candles.length - 1, t.x2 + Math.round((t.x2 - t.x1) * 0.5));
@@ -187,9 +219,10 @@ export default function MainChart({ candleMap, scenario }: Props) {
         trendlineSeriesRef.current.push(lineSeries);
       }
     }
+    } // end showTrendlines
 
     chart.timeScale().fitContent();
-  }, [candleMap, selectedTf, scenario]);
+  }, [candleMap, selectedTf, scenario, showTrendlines]);
 
   useEffect(() => {
     updateChart();
@@ -197,7 +230,7 @@ export default function MainChart({ candleMap, scenario }: Props) {
 
   return (
     <div className="chart-section">
-      {/* ── Timeframe selector ──────────────────────────────────────── */}
+      {/* ── Timeframe selector + controls ────────────────────────────── */}
       <div className="chart-tf-selector">
         {TIMEFRAMES.map((tf) => (
           <button
@@ -208,19 +241,45 @@ export default function MainChart({ candleMap, scenario }: Props) {
             {tf}
           </button>
         ))}
+        <span className="chart-controls-divider" />
+        <button
+          className={`chart-toggle-btn ${showTrendlines ? "active" : ""}`}
+          onClick={() => setShowTrendlines(!showTrendlines)}
+          aria-pressed={showTrendlines}
+          title={t("chart.showTrendlines")}
+        >
+          ↗
+        </button>
+        <button
+          className={`chart-toggle-btn ${showExplanation ? "active" : ""}`}
+          onClick={() => setShowExplanation(!showExplanation)}
+          aria-pressed={showExplanation}
+          title={t("chart.showExplanation")}
+        >
+          📝
+        </button>
+        <button
+          className="chart-toggle-btn"
+          onClick={() => chartRef.current?.timeScale().fitContent()}
+          title={t("chart.resetZoom")}
+        >
+          ⟲
+        </button>
       </div>
 
       {/* ── Interactive chart ───────────────────────────────────────── */}
       <div ref={containerRef} className="lw-chart-container" />
 
       {/* ── Reasoning overlay ───────────────────────────────────────── */}
-      <div className="chart-reasoning">
-        {scenario.explanationLines.map((line, i) => (
-          <div key={i} className="reasoning-line">
-            {formatLine(line, i)}
-          </div>
-        ))}
-      </div>
+      {showExplanation && (
+        <div className="chart-reasoning">
+          {scenario.explanationLines.map((line, i) => (
+            <div key={i} className="reasoning-line">
+              {formatLine(line, i)}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
