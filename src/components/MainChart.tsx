@@ -61,6 +61,7 @@ export default function MainChart({ candleMap, scenario, theme = "dark" }: Props
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const priceLinesRef = useRef<IPriceLine[]>([]);
   const trendlineSeriesRef = useRef<ISeriesApi<"Line">[]>([]);
+  const lastSeriesStateRef = useRef<{ timeframe: Timeframe; length: number; lastTime: number | null } | null>(null);
   const [selectedTf, setSelectedTf] = useState<Timeframe>("1H");
   const [showTrendlines, setShowTrendlines] = useState(true);
   const [showExplanation, setShowExplanation] = useState(true);
@@ -147,7 +148,29 @@ export default function MainChart({ candleMap, scenario, theme = "dark" }: Props
       low: c.low,
       close: c.close,
     }));
-    series.setData(data);
+    const lastBar = data[data.length - 1];
+    const previousState = lastSeriesStateRef.current;
+    const shouldResetSeries =
+      !previousState ||
+      previousState.timeframe !== selectedTf ||
+      previousState.length === 0 ||
+      data.length === 0 ||
+      previousState.length > data.length ||
+      previousState.lastTime === null ||
+      previousState.lastTime !== candles[candles.length - 1]?.time;
+
+    if (shouldResetSeries) {
+      series.setData(data);
+      chart.timeScale().fitContent();
+    } else if (lastBar) {
+      series.update(lastBar);
+    }
+
+    lastSeriesStateRef.current = {
+      timeframe: selectedTf,
+      length: data.length,
+      lastTime: candles[candles.length - 1]?.time ?? null,
+    };
 
     // ── Remove old price lines ─────────────────────────────────────
     for (const pl of priceLinesRef.current) {
@@ -231,8 +254,6 @@ export default function MainChart({ candleMap, scenario, theme = "dark" }: Props
       }
     }
     } // end showTrendlines
-
-    chart.timeScale().fitContent();
   }, [candleMap, selectedTf, scenario, showTrendlines]);
 
   useEffect(() => {

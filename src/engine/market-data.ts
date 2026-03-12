@@ -117,7 +117,14 @@ async function fetchWithTimeout(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, { signal: controller.signal });
+    return await fetch(url, {
+      signal: controller.signal,
+      cache: "no-store",
+      headers: {
+        "cache-control": "no-cache",
+        pragma: "no-cache",
+      },
+    });
   } finally {
     clearTimeout(timer);
   }
