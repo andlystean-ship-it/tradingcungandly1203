@@ -596,7 +596,7 @@ function assessEntryQuality(
 
 // ── Per-timeframe entry computation ───────────────────────────────────────────
 
-const ENTRY_TFS: Timeframe[] = ["15M", "1H", "4H", "12H", "1D"];
+const ENTRY_TFS: Timeframe[] = ["15M", "1H", "2H", "4H", "6H", "8H", "12H", "1D", "1W"];
 
 function resolveEntryBias(
   marketBias: MarketBias,
@@ -721,9 +721,39 @@ export function getEntryForTimeframe(
     pendingShort: fix(shortEntry),
     targetPrice: fix(target),
     invalidationLevel: fix(invalidation),
+    preferredSide,
+    qualityScore: 0,
+    actionable: false,
+    reasons: [],
     longReason,
     shortReason,
   };
+}
+
+function buildStepByStepSignal(
+  marketBias: MarketBias,
+  trendContext: TrendContext,
+  primarySide: "long" | "short" | "neutral",
+  status: SignalStatus,
+  entryQuality: EntryQuality,
+  pendingLong: number,
+  pendingShort: number,
+  targetPrice: number,
+  invalidationLevel: number,
+): string[] {
+  const steps: string[] = [];
+  steps.push(`Bias ${marketBias.dominantSide} ${marketBias.confidence}% | HTF agreement ${marketBias.htfAgreement ?? 50}%`);
+  steps.push(`Trend ${trendContext.alignment} | pressure ${trendContext.pressure?.dominantPressureDirection ?? "neutral"}`);
+  if (primarySide === "neutral") {
+    steps.push("Wait for directional confirmation before taking any setup.");
+  } else if (primarySide === "long") {
+    steps.push(`Watch reaction near long entry ${pendingLong.toFixed(2)} and require close-back-above confirmation.`);
+  } else {
+    steps.push(`Watch reaction near short entry ${pendingShort.toFixed(2)} and require close-back-below confirmation.`);
+  }
+  steps.push(`Target ${targetPrice.toFixed(2)} | invalidation ${invalidationLevel.toFixed(2)} | status ${status}`);
+  steps.push(`Setup quality ${entryQuality.qualityScore}/100 with ${entryQuality.confluences} confluences.`);
+  return steps;
 }
 
 // ── Main scenario builder ─────────────────────────────────────────────────────
@@ -892,6 +922,25 @@ export function buildScenario(input: ScenarioInput): MarketScenario {
     pivot, targetPrice, pendingLong, pendingShort, invalidationLevel,
     status, trendContext, fmt, entryQuality, primaryScenarioIsActionable
   );
+  const srZones = timeframeSignals
+    .flatMap(signal => signal.srZones ?? [])
+    .sort((left, right) => Math.abs(left.center - currentPrice) - Math.abs(right.center - currentPrice))
+    .slice(0, 8);
+  const candlePatterns = timeframeSignals
+    .flatMap(signal => signal.candlePatterns ?? [])
+    .sort((left, right) => right.reliability - left.reliability)
+    .slice(0, 6);
+  const stepByStepSignal = buildStepByStepSignal(
+    marketBias,
+    trendContext,
+    primarySide,
+    status,
+    entryQuality,
+    pendingLong,
+    pendingShort,
+    targetPrice,
+    invalidationLevel,
+  );
 
   // ── Primary + alternate scenarios ──────────────────────────────────────────
   const primaryScenario: { side: "long" | "short" | "neutral"; trigger: number; target: number; rationale: string } = primarySide === "neutral"
@@ -978,6 +1027,9 @@ export function buildScenario(input: ScenarioInput): MarketScenario {
     primaryScenarioIsActionable,
     primaryRejectReason,
     entriesByTF: computeEntriesByTF(candleMap, marketBias, trendContext),
+    srZones,
+    candlePatterns,
+    stepByStepSignal,
   };
 }
 
@@ -990,7 +1042,18 @@ function computeEntriesByTF(
   const entries: TimeframeEntry[] = [];
   for (const tf of ENTRY_TFS) {
     const entry = getEntryForTimeframe(tf, candleMap, marketBias, trendContext);
-    if (entry) entries.push(entry);
+    if (!entry) continue;
+    const preferredEntry = entry.preferredSide === "short" ? entry.shortEntry : entry.longEntry;
+    const qualityScore = Math.round(Math.max(20, Math.min(95, 50 + marketBias.confidence * 0.35 + (trendContext.pressure?.pressureStrength ?? 0) * 0.15)));
+    entry.qualityScore = qualityScore;
+    entry.actionable = marketBias.dominantSide !== "neutral" && qualityScore >= 55;
+    entry.reasons = [
+      `preferred ${entry.preferredSide ?? "neutral"}`,
+      `entry ${preferredEntry.toFixed(2)}`,
+      `target ${entry.target.toFixed(2)}`,
+      `invalidation ${entry.invalidation.toFixed(2)}`,
+    ];
+    entries.push(entry);
   }
   return entries;
 }

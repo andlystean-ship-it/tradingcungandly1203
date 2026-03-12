@@ -40,6 +40,7 @@ const TF_MAP: Record<Timeframe, string> = {
   "8H": "8h",
   "12H": "12h",
   "1D": "1d",
+  "1W": "1w",
 };
 
 type KlinePayload = {
@@ -115,12 +116,6 @@ export class BinanceWsClient {
         if (payload.e !== "kline" || !payload.k) return;
 
         const k = payload.k;
-
-        // Find which timeframe this belongs to
-        const tf = this.options.timeframes.find(
-          t => `${binanceSymbol}@kline_${TF_MAP[t]}` ===
-            `${binanceSymbol}@kline_${TF_MAP[t]}`
-        );
 
         // Determine timeframe from the stream data
         const matchedTf = Object.entries(TF_MAP).find(

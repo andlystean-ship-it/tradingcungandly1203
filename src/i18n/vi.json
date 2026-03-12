@@ -20,6 +20,7 @@
   },
   "dataSource": {
     "live": "LIVE",
+    "proxy": "PROXY",
     "offline": "OFFLINE",
     "partial": "(partial)",
     "refreshing": "↻ đang làm mới…",
@@ -68,10 +69,15 @@
   "news": {
     "title": "Tin tức & Sentiment",
     "count": "{{count}} tin",
+    "liveFeed": "Nguồn live",
+    "mixedFeed": "Nguồn trộn live/fallback",
+    "fallbackFeed": "Không có live feed",
+    "systemFallback": "fallback hệ thống",
     "bullish": "Tích cực",
     "bearish": "Tiêu cực",
     "neutral": "Trung tính",
-    "hasTarget": "Có Mục Tiêu Giá"
+    "hasTarget": "Có Mục Tiêu Giá",
+    "secondaryOnly": "Khung này chỉ là ngữ cảnh phụ. Khi feed live không sẵn có, engine vẫn chạy mà không dùng tin tức để tạo tín hiệu."
   },
   "loading": {
     "market": "Đang tải dữ liệu thị trường…"

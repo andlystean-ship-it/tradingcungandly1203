@@ -6,9 +6,9 @@
  * trend pressure, data status, regression fixtures, invariant tests.
  */
 import { describe, it, expect } from "vitest";
-import type { CandleData, Timeframe, TimeframeSignal, MarketBias, TrendContext, TrendPressure } from "../../types";
+import type { CandleData, Timeframe, TimeframeSignal, MarketBias, TrendContext } from "../../types";
 import { scoreTimeframe, type HTFContext } from "../scoring";
-import { computeBias, type BiasContext } from "../bias";
+import { computeBias } from "../bias";
 import { buildScenario, type ScenarioInput } from "../scenario";
 import { calcPivot } from "../pivot";
 import { detectSwingHighs, detectSwingLows, detectSwingsWithDebug, type SwingConfig, DEFAULT_SWING_CONFIG } from "../swings";
@@ -78,7 +78,7 @@ function makeDowntrend(base: number, count = 60, step = 0.5, spread = 0.02): Can
 }
 
 function makeCandleMap(close: number, count = 30): Record<Timeframe, CandleData[]> {
-  const tfs: Timeframe[] = ["15M", "1H", "2H", "4H", "6H", "8H", "12H", "1D"];
+  const tfs: Timeframe[] = ["15M", "1H", "2H", "4H", "6H", "8H", "12H", "1D", "1W"];
   const map = {} as Record<Timeframe, CandleData[]>;
   for (const tf of tfs) {
     map[tf] = makeCandles(close, count);
@@ -87,7 +87,7 @@ function makeCandleMap(close: number, count = 30): Record<Timeframe, CandleData[
 }
 
 function makeTrendCandleMap(direction: "up" | "down", base: number): Record<Timeframe, CandleData[]> {
-  const tfs: Timeframe[] = ["15M", "1H", "2H", "4H", "6H", "8H", "12H", "1D"];
+  const tfs: Timeframe[] = ["15M", "1H", "2H", "4H", "6H", "8H", "12H", "1D", "1W"];
   const map = {} as Record<Timeframe, CandleData[]>;
   const maker = direction === "up" ? makeUptrend : makeDowntrend;
   for (const tf of tfs) {
@@ -101,6 +101,17 @@ function makeSignal(
   bullishScore: number,
   bias: "bullish" | "bearish" | "neutral"
 ): TimeframeSignal {
+  const strengthMap: Record<Timeframe, number> = {
+    "15M": 1,
+    "1H": 2,
+    "2H": 2,
+    "4H": 3,
+    "6H": 4,
+    "8H": 4,
+    "12H": 5,
+    "1D": 6,
+    "1W": 7,
+  };
   return {
     timeframe: tf,
     bullishLevel: 100,
@@ -108,7 +119,7 @@ function makeSignal(
     bullishScore,
     bearishScore: 100 - bullishScore,
     bias,
-    strength: { "15M": 1, "1H": 2, "2H": 2, "4H": 3, "6H": 4, "8H": 4, "12H": 5, "1D": 6 }[tf],
+    strength: strengthMap[tf],
   };
 }
 
@@ -485,7 +496,7 @@ describe("swing detection", () => {
   });
 
   it("rejects micro-swings in tight ranges", () => {
-    const { highs, lows, debug } = detectSwingsWithDebug(
+    const { debug } = detectSwingsWithDebug(
       makeCandles(100, 60, 0.003), // very tight range
       { ...DEFAULT_SWING_CONFIG, leftWindow: 3, rightConfirmationWindow: 2 }
     );
@@ -555,7 +566,7 @@ describe("trendline generation", () => {
 
   it("scores candidates and returns best quality lines", () => {
     const candles = makeCandles(100, 100, 0.04);
-    const { trendlines, debug } = buildTrendlinesWithDebug(candles);
+    const { debug } = buildTrendlinesWithDebug(candles);
 
     // Debug output should document the selection process
     expect(debug.candidatesGenerated).toBeGreaterThanOrEqual(0);
@@ -649,7 +660,17 @@ describe("MTF trend context", () => {
       expect(layer.strength).toBeGreaterThanOrEqual(0);
       expect(layer.strength).toBeLessThanOrEqual(100);
       expect(Array.isArray(layer.activeTrendlines)).toBe(true);
+      expect(["bullish", "bearish", "mixed", "neutral"]).toContain(layer.structureState);
+      expect(["bullish", "bearish", "neutral"]).toContain(layer.trendlineState);
+      expect(["bullish", "bearish", "neutral"]).toContain(layer.emaState);
+      expect(["compressed_support", "compressed_resistance", "balanced", "neutral"]).toContain(layer.pressureState);
+      expect(Array.isArray(layer.rationale)).toBe(true);
+      expect(layer.rationale!.length).toBeGreaterThan(0);
     }
+
+    expect(tc.shortTermTrend).toBe(tc.shortTerm.direction);
+    expect(tc.mediumTermTrend).toBe(tc.mediumTerm.direction);
+    expect(tc.higherTimeframeTrend).toBe(tc.higherTimeframe.direction);
   });
 
   it("returns aligned_bullish when all TFs trend up", () => {
@@ -687,6 +708,26 @@ describe("MTF trend context", () => {
     const tc = buildTrendContext(candleMap, customTrendlines);
     expect(tc.shortTerm.activeTrendlines.length).toBeGreaterThanOrEqual(1);
     expect(tc.shortTerm.activeTrendlines[0].id).toBe("test-asc-1");
+  });
+
+  it("includes rationale and non-neutral state when structure is directional", () => {
+    const candleMap = makeTrendCandleMap("up", 100);
+    const tc = buildTrendContext(candleMap);
+
+    expect(tc.shortTerm.structureState).not.toBeUndefined();
+    expect(tc.shortTerm.emaState).not.toBeUndefined();
+    expect(tc.shortTerm.rationale).toBeDefined();
+    expect(tc.shortTerm.rationale!.length).toBeGreaterThan(0);
+  });
+
+  it("uses swing-derived structure state for directional trends", () => {
+    const bullishContext = buildTrendContext(makeTrendCandleMap("up", 100));
+    const bearishContext = buildTrendContext(makeTrendCandleMap("down", 100));
+
+    expect(["bullish", "mixed", "neutral"]).toContain(bullishContext.shortTerm.structureState);
+    expect(["bearish", "mixed", "neutral"]).toContain(bearishContext.shortTerm.structureState);
+    expect(bullishContext.shortTerm.structureState).not.toBe("bearish");
+    expect(bearishContext.shortTerm.structureState).not.toBe("bullish");
   });
 });
 
@@ -1079,6 +1120,7 @@ describe("regression fixtures", () => {
       "8H": makeDowntrend(100, 60),
       "12H": makeDowntrend(100, 60),
       "1D": makeDowntrend(100, 60),
+      "1W": makeDowntrend(100, 60),
     };
     const tc = buildTrendContext(candleMap);
 

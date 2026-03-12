@@ -14,7 +14,7 @@ export type Symbol =
   | "SUI/USDT";
 export type Direction = "long" | "short";
 export type Bias = "bullish" | "bearish" | "neutral";
-export type Timeframe = "15M" | "1H" | "2H" | "4H" | "6H" | "8H" | "12H" | "1D";
+export type Timeframe = "15M" | "1H" | "2H" | "4H" | "6H" | "8H" | "12H" | "1D" | "1W";
 
 // ── Signal status ─────────────────────────────────────────────────────────────
 export type SignalStatus =
@@ -82,6 +82,11 @@ export type TrendLayer = {
   activeTrendlines: Trendline[];
   dominantLine: Trendline | null;
   strength: number; // 0–100
+  structureState?: "bullish" | "bearish" | "mixed" | "neutral";
+  trendlineState?: "bullish" | "bearish" | "neutral";
+  emaState?: "bullish" | "bearish" | "neutral";
+  pressureState?: "compressed_support" | "compressed_resistance" | "balanced" | "neutral";
+  rationale?: string[];
 };
 
 export type TrendContext = {
@@ -97,6 +102,51 @@ export type TrendContext = {
     ema50: number;
     ema200: number;
   };
+  shortTermTrend?: TrendDirection;
+  mediumTermTrend?: TrendDirection;
+  higherTimeframeTrend?: TrendDirection;
+};
+
+export type SRZone = {
+  id: string;
+  timeframe: Timeframe | "multi";
+  kind: "support" | "resistance";
+  center: number;
+  top: number;
+  bottom: number;
+  sourceTags: string[];
+  strengthScore: number;
+};
+
+export type CandlePatternDirection = "bullish" | "bearish" | "neutral";
+
+export type CandlePattern = {
+  name:
+    | "Bullish Engulfing"
+    | "Bearish Engulfing"
+    | "Hammer"
+    | "Inverted Hammer"
+    | "Shooting Star"
+    | "Morning Star"
+    | "Evening Star"
+    | "Three White Soldiers"
+    | "Three Black Crows"
+    | "Doji";
+  direction: CandlePatternDirection;
+  reliability: number;
+  candleIndex: number;
+  timeframe: Timeframe;
+  label: string;
+};
+
+export type EMAState = {
+  ema20: number;
+  ema50: number;
+  ema200: number;
+  slope20: number;
+  slope50: number;
+  slope200: number;
+  direction: TrendDirection;
 };
 
 // ── Trend pressure model (P4) ────────────────────────────────────────────────
@@ -140,6 +190,10 @@ export type TimeframeSignal = {
   bullishLevelMeta?: LevelMeta;
   /** Metadata about bearish level selection */
   bearishLevelMeta?: LevelMeta;
+  reasoningTags?: string[];
+  emaState?: EMAState;
+  candlePatterns?: CandlePattern[];
+  srZones?: SRZone[];
 };
 
 export type LevelMeta = {
@@ -165,6 +219,8 @@ export type MarketBias = {
   bearishPercent: number;
   dominantSide: Direction | "neutral";
   confidence: number; // 0–100
+  conflictFlags?: string[];
+  htfAgreement?: number;
   /** Debug metadata for audit / scenario consumption */
   debug?: BiasDebug;
 };
@@ -188,6 +244,10 @@ export type TimeframeEntry = {
   pendingShort: number;
   targetPrice: number;
   invalidationLevel: number;
+  preferredSide?: Direction | "neutral";
+  qualityScore?: number;
+  actionable?: boolean;
+  reasons?: string[];
   longReason: string;
   shortReason: string;
 };
@@ -228,6 +288,9 @@ export type MarketScenario = {
   primaryRejectReason?: string;
   /** Per-timeframe entries with distinct S/R levels */
   entriesByTF?: TimeframeEntry[];
+  srZones?: SRZone[];
+  candlePatterns?: CandlePattern[];
+  stepByStepSignal?: string[];
 };
 
 // ── Data freshness ────────────────────────────────────────────────────────────
@@ -307,6 +370,8 @@ export type EngineOutput = {
 export type NewsItem = {
   id: string;
   source: string;
+  sourceAttribution?: string;
+  sourceProvider?: "cryptopanic" | "newsapi" | "system";
   publishedAt: string;
   title: string;
   summary: string;
@@ -314,4 +379,5 @@ export type NewsItem = {
   sentimentLabel: Bias;
   sentimentScore: number;
   hasTargetPrice: boolean;
+  sourceMode?: "live" | "fallback";
 };

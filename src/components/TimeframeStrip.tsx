@@ -25,9 +25,10 @@ export default function TimeframeStrip({ signals, entriesByTF }: Props) {
       <div className="tf-cards">
         {signals.map((s) => {
           const entry = entryMap.get(s.timeframe);
+          const reasoning = (s.reasoningTags ?? []).slice(0, 3).join(", ");
           const tooltip = entry
-            ? `Long: ${formatNum(entry.longEntry)} | Short: ${formatNum(entry.shortEntry)}\nTarget: ${formatNum(entry.target)} | Inv: ${formatNum(entry.invalidation)}`
-            : undefined;
+            ? `Long: ${formatNum(entry.longEntry)} | Short: ${formatNum(entry.shortEntry)}\nTarget: ${formatNum(entry.target)} | Inv: ${formatNum(entry.invalidation)}\n${reasoning}`
+            : reasoning || undefined;
           return (
             <div
               key={s.timeframe}
@@ -43,6 +44,12 @@ export default function TimeframeStrip({ signals, entriesByTF }: Props) {
                 <div className="tf-entry-row">
                   <span className="tf-long-entry">L:{formatNum(entry.longEntry)}</span>
                   <span className="tf-short-entry">S:{formatNum(entry.shortEntry)}</span>
+                </div>
+              )}
+              {!!entry?.qualityScore && (
+                <div className="tf-entry-row">
+                  <span className="tf-long-entry">Q:{entry.qualityScore}</span>
+                  <span className="tf-short-entry">{entry.actionable ? "ready" : "wait"}</span>
                 </div>
               )}
             </div>

@@ -8,12 +8,20 @@ type Props = {
 
 export default function NewsPanel({ news, symbol }: Props) {
   const { t } = useTranslation();
-  const coinName = symbol === "XAU/USDT" ? "XAU" : "BTC";
+  const coinName = symbol.split("/")[0];
+  const hasLiveFeed = news.some((item) => item.sourceMode === "live");
+  const hasFallbackFeed = news.some((item) => item.sourceMode === "fallback");
+  const feedLabel = hasLiveFeed && hasFallbackFeed
+    ? t("news.mixedFeed")
+    : hasLiveFeed
+      ? t("news.liveFeed")
+      : t("news.fallbackFeed");
 
   return (
     <div className="news-panel" role="region" aria-label={t("news.title")}>
       <div className="news-header">
         <div className="news-title">{t("news.title")} — {coinName}</div>
+        <div className="news-badge">{feedLabel}</div>
         <div className="news-badge">{t("news.count", { count: news.length })}</div>
       </div>
 
@@ -22,6 +30,8 @@ export default function NewsPanel({ news, symbol }: Props) {
           <div key={item.id} className="news-card">
             <div className="news-meta">
               <span className="news-source">{item.source}</span>
+              {item.sourceMode === "live" && item.sourceAttribution && <span className="news-time">· {item.sourceAttribution}</span>}
+              {item.sourceMode === "fallback" && <span className="news-time">· {t("news.systemFallback")}</span>}
               <span className="news-time">· {item.publishedAt}</span>
             </div>
 
@@ -41,11 +51,16 @@ export default function NewsPanel({ news, symbol }: Props) {
                 <div className={`news-sentiment ${item.sentimentLabel}`}>
                   {t(`news.${item.sentimentLabel}`)} ({item.sentimentScore}%)
                 </div>
-                {item.hasTargetPrice && (
+                {item.sourceMode !== "fallback" && item.hasTargetPrice && (
                   <button className="news-cta">{t("news.hasTarget")}</button>
                 )}
               </div>
             </div>
+            {item.sourceMode === "fallback" && (
+              <div className="news-summary" style={{ marginTop: 8, opacity: 0.8 }}>
+                {t("news.secondaryOnly")}
+              </div>
+            )}
           </div>
         ))}
       </div>

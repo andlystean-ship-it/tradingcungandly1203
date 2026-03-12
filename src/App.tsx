@@ -46,7 +46,7 @@ export default function App() {
     setLastSymbol(s);
   };
 
-  // Fetch live news (falls back to static on error, cached 5 min)
+  // Fetch live news with a short-lived honest fallback when no verified feed is available.
   useEffect(() => {
     let cancelled = false;
     getNewsAsync(symbol).then((items) => {
@@ -93,6 +93,7 @@ export default function App() {
       />
       <DataSourceBadge
         source={engine.dataStatus.sourceStatus}
+        sourceMode={engine.dataStatus.sourceMode}
         loading={loading}
         lastUpdated={engine.dataStatus.lastUpdated}
         warning={isStale ? t("dataSource.staleWarning") : engine.dataStatus.warning}

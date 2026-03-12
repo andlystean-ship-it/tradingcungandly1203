@@ -48,6 +48,20 @@ describe("scoreSentiment", () => {
     const { label } = scoreSentiment("BULLISH SURGE RALLY BREAKOUT PUMP ACCUMULATION");
     expect(label).toBe("bullish");
   });
+
+  it("treats plain support or resistance location headlines as neutral", () => {
+    const support = scoreSentiment("Bitcoin tests support near $82k as traders wait for confirmation");
+    const resistance = scoreSentiment("Ethereum trades near resistance ahead of CPI release");
+    expect(support.label).toBe("neutral");
+    expect(resistance.label).toBe("neutral");
+  });
+
+  it("still detects directional technical phrases when context is explicit", () => {
+    const bullish = scoreSentiment("Bitcoin breaks resistance after ETF inflows and institutional adoption");
+    const bearish = scoreSentiment("Solana breaks support after liquidation and outflows accelerate");
+    expect(bullish.label).toBe("bullish");
+    expect(bearish.label).toBe("bearish");
+  });
 });
 
 // ── Notifier system ───────────────────────────────────────────────────────────
@@ -144,7 +158,7 @@ describe("KNOWN_SYMBOLS", () => {
 
 // ── Engine config threading ───────────────────────────────────────────────────
 import { buildTrendlines } from "../trendlines";
-import { detectSwingHighs, detectSwingLows } from "../swings";
+import { DEFAULT_SWING_CONFIG, detectSwingHighs } from "../swings";
 import type { CandleData } from "../../types";
 
 describe("Engine config threading", () => {
@@ -178,8 +192,16 @@ describe("Engine config threading", () => {
 
   it("different swing configs produce different swing counts", () => {
     const candles = makeCandles(80, 100);
-    const looseHighs = detectSwingHighs(candles, { minSwingDistance: 3, minPriceSeparationPct: 0.001 });
-    const strictHighs = detectSwingHighs(candles, { minSwingDistance: 10, minPriceSeparationPct: 0.05 });
+    const looseHighs = detectSwingHighs(candles, {
+      ...DEFAULT_SWING_CONFIG,
+      minSwingDistance: 3,
+      minPriceSeparationPct: 0.001,
+    });
+    const strictHighs = detectSwingHighs(candles, {
+      ...DEFAULT_SWING_CONFIG,
+      minSwingDistance: 10,
+      minPriceSeparationPct: 0.05,
+    });
     // Looser config should find at least as many swings
     expect(looseHighs.length).toBeGreaterThanOrEqual(strictHighs.length);
   });
@@ -461,8 +483,11 @@ describe("news API integration", () => {
     const items = await fetchNewsFromApi("BTC/USDT");
     expect(items).toHaveLength(1);
     expect(items[0].source).toBe("CryptoPanic");
+    expect(items[0].sourceAttribution).toBe("via CryptoPanic");
+    expect(items[0].sourceProvider).toBe("cryptopanic");
     expect(items[0].publishedAt).toContain("GMT+7");
     expect(items[0].sentimentLabel).toBe("bullish");
+    expect(items[0].sourceMode).toBe("live");
   });
 
   it("caches live news by symbol", async () => {
@@ -489,11 +514,44 @@ describe("news API integration", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("falls back to static news when live API fails", async () => {
+  it("falls back to explicit unavailable placeholder when live API fails", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network"));
 
     const items = await getNewsAsync("BTC/USDT");
     expect(items.length).toBeGreaterThan(0);
-    expect(items[0].id.startsWith("btc-")).toBe(true);
+    expect(items[0].id.startsWith("fallback-")).toBe(true);
+    expect(items[0].sourceMode).toBe("fallback");
+    expect(items[0].sourceProvider).toBe("system");
+    expect(items[0].sentimentLabel).toBe("neutral");
+    expect(items[0].hasTargetPrice).toBe(false);
+  });
+
+  it("retries live fetch sooner when fallback cache expires", async () => {
+    vi.useFakeTimers();
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockRejectedValueOnce(new Error("network"))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          results: [
+            {
+              id: 3,
+              title: "Bitcoin breakout with ETF inflows",
+              source: { title: "CryptoPanic" },
+              published_at: "2026-03-12T03:00:00.000Z",
+              currencies: [{ code: "BTC" }],
+            },
+          ],
+        }),
+      } as Response);
+
+    const first = await getNewsAsync("BTC/USDT");
+    expect(first[0].sourceMode).toBe("fallback");
+
+    vi.advanceTimersByTime(31_000);
+    const second = await getNewsAsync("BTC/USDT");
+    expect(second[0].sourceMode).toBe("live");
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
   });
 });

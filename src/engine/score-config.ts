@@ -10,41 +10,46 @@
 // ── Scoring component weights (must sum to 1.0) ─────────────────────────────
 
 export type ScoreWeights = {
-  position: number;
-  pivotReclaim: number;
-  momentum: number;
-  support: number;
-  resistance: number;
+  structure: number;
+  pivot: number;
+  srReaction: number;
   trendline: number;
-  breakRetest: number;
+  ema: number;
+  candlePattern: number;
+  momentum: number;
   volatility: number;
   htfAlignment: number;
 };
 
 export const DEFAULT_WEIGHTS: Readonly<ScoreWeights> = {
-  position: 0.15,
-  pivotReclaim: 0.12,
-  momentum: 0.15,
-  support: 0.10,
-  resistance: 0.10,
+  structure: 0.17,
+  pivot: 0.10,
+  srReaction: 0.12,
   trendline: 0.12,
-  breakRetest: 0.10,
+  ema: 0.12,
+  candlePattern: 0.08,
+  momentum: 0.15,
   volatility: 0.04,
-  htfAlignment: 0.12,
+  htfAlignment: 0.10,
 };
 
 // ── Score breakdown: per-component output for audit / debug ──────────────────
 
 export type ScoreBreakdown = {
-  position: number;
-  pivotReclaim: number;
-  momentum: number;
-  support: number;
-  resistance: number;
+  structure: number;
+  pivot: number;
+  srReaction: number;
   trendline: number;
-  breakRetest: number;
+  ema: number;
+  candlePattern: number;
+  momentum: number;
   volatility: number;
   htfAlignment: number;
+  position?: number;
+  pivotReclaim?: number;
+  support?: number;
+  resistance?: number;
+  breakRetest?: number;
   /** Final weighted score 0–100 */
   total: number;
 };

@@ -25,7 +25,6 @@ import { FETCH_COUNTS } from "./windows";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const BINANCE_BASE = "https://api.binance.com/api/v3";
-const CANDLE_LIMIT = 100; // candles per request
 const FETCH_TIMEOUT_MS = 8000;
 
 // ── Symbol → Binance pair ─────────────────────────────────────────────────────
@@ -95,6 +94,7 @@ const BINANCE_INTERVAL: Record<Timeframe, string> = {
   "8H": "8h",
   "12H": "12h",
   "1D": "1d",
+  "1W": "1w",
 };
 
 // ── Raw Binance kline row ─────────────────────────────────────────────────────
@@ -179,7 +179,7 @@ export type FetchResult = {
 };
 
 const ALL_TIMEFRAMES: Timeframe[] = [
-  "15M", "1H", "2H", "4H", "6H", "8H", "12H", "1D",
+  "15M", "1H", "2H", "4H", "6H", "8H", "12H", "1D", "1W",
 ];
 
 /**

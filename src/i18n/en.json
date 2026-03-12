@@ -20,6 +20,7 @@
   },
   "dataSource": {
     "live": "LIVE",
+    "proxy": "PROXY",
     "offline": "OFFLINE",
     "partial": "(partial)",
     "refreshing": "↻ refreshing…",
@@ -68,10 +69,15 @@
   "news": {
     "title": "News & Sentiment",
     "count": "{{count}} articles",
+    "liveFeed": "Live feed",
+    "mixedFeed": "Mixed live/fallback feed",
+    "fallbackFeed": "No live feed",
+    "systemFallback": "system fallback",
     "bullish": "Bullish",
     "bearish": "Bearish",
     "neutral": "Neutral",
-    "hasTarget": "Has Price Target"
+    "hasTarget": "Has Price Target",
+    "secondaryOnly": "This panel is secondary context only. If live news is unavailable, the engine continues without using articles to generate signals."
   },
   "loading": {
     "market": "Loading market data…"

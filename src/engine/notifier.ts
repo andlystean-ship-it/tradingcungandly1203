@@ -49,11 +49,13 @@ export class BrowserNotifier implements Notifier {
 
 export class TelegramNotifier implements Notifier {
   readonly name = "telegram";
+  private botToken: string;
+  private chatId: string;
 
-  constructor(
-    private botToken: string,
-    private chatId: string,
-  ) {}
+  constructor(botToken: string, chatId: string) {
+    this.botToken = botToken;
+    this.chatId = chatId;
+  }
 
   async send(payload: NotificationPayload): Promise<void> {
     if (!this.botToken || !this.chatId) return;

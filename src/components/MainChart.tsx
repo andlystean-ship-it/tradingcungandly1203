@@ -5,13 +5,12 @@ import {
   ColorType,
   LineStyle,
   CrosshairMode,
+  type UTCTimestamp,
   type IChartApi,
   type ISeriesApi,
   type IPriceLine,
 } from "lightweight-charts";
-import type { CandleData, MarketScenario, Trendline, Timeframe } from "../types";
-
-type CandleMap = Record<Timeframe, CandleData[]>;
+import type { CandleMap, MarketScenario, Trendline, Timeframe } from "../types";
 
 type Props = {
   candleMap: CandleMap;
@@ -19,7 +18,7 @@ type Props = {
   theme?: "dark" | "light";
 };
 
-const TIMEFRAMES: Timeframe[] = ["15M", "1H", "2H", "4H", "6H", "8H", "12H", "1D"];
+const TIMEFRAMES: Timeframe[] = ["15M", "1H", "2H", "4H", "6H", "8H", "12H", "1D", "1W"];
 
 const UP_COLOR = "#26a69a";
 const DN_COLOR = "#ef5350";
@@ -142,7 +141,7 @@ export default function MainChart({ candleMap, scenario, theme = "dark" }: Props
 
     const candles = candleMap[selectedTf] || [];
     const data = candles.map((c) => ({
-      time: c.time as number,
+      time: c.time as UTCTimestamp,
       open: c.open,
       high: c.high,
       low: c.low,
@@ -187,6 +186,18 @@ export default function MainChart({ candleMap, scenario, theme = "dark" }: Props
       }
     }
 
+    for (const zone of (scenario.srZones ?? []).filter((item) => item.timeframe === selectedTf || item.timeframe === "multi").slice(0, 4)) {
+      const pl = series.createPriceLine({
+        price: zone.center,
+        color: zone.kind === "support" ? "rgba(38,166,154,0.55)" : "rgba(239,83,80,0.55)",
+        lineWidth: zone.strengthScore >= 70 ? 2 : 1,
+        lineStyle: LineStyle.Dashed,
+        axisLabelVisible: true,
+        title: `${zone.kind === "support" ? "SZ" : "RZ"} ${selectedTf}`,
+      });
+      priceLinesRef.current.push(pl);
+    }
+
     // ── Draw trendlines ────────────────────────────────────────────
     if (showTrendlines) {
       const activeTrendlines = scenario.trendlines.filter((t) => t.active);
@@ -198,12 +209,12 @@ export default function MainChart({ candleMap, scenario, theme = "dark" }: Props
       if (startIdx >= candles.length || endIdx < 0) continue;
 
       const lineColor = t.kind === "ascending" ? "#26a69a" : "#ef5350";
-      const lineData: { time: number; value: number }[] = [];
+      const lineData: { time: UTCTimestamp; value: number }[] = [];
 
       // Sample points along the trendline
       for (let idx = startIdx; idx <= endIdx && idx < candles.length; idx++) {
         const price = extrapolatePrice(t, idx);
-        lineData.push({ time: candles[idx].time, value: +price.toFixed(4) });
+        lineData.push({ time: candles[idx].time as UTCTimestamp, value: +price.toFixed(4) });
       }
 
       if (lineData.length >= 2) {
@@ -276,6 +287,13 @@ export default function MainChart({ candleMap, scenario, theme = "dark" }: Props
           {scenario.explanationLines.map((line, i) => (
             <div key={i} className="reasoning-line">
               {formatLine(line, i)}
+            </div>
+          ))}
+          {(scenario.candlePatterns ?? []).filter((pattern) => pattern.timeframe === selectedTf).slice(0, 3).map((pattern) => (
+            <div key={`${pattern.timeframe}-${pattern.candleIndex}-${pattern.name}`} className="reasoning-line">
+              <span style={{ color: pattern.direction === "bullish" ? "var(--text-green)" : pattern.direction === "bearish" ? "var(--text-red)" : "var(--text-muted)" }}>
+                {pattern.label} ({pattern.reliability})
+              </span>
             </div>
           ))}
         </div>

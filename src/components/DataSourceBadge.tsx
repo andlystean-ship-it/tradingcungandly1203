@@ -4,10 +4,12 @@
  * plus a loading pulse and last-updated time.
  */
 
+import type { SourceMode } from "../types";
 import { useTranslation } from "react-i18next";
 
 type Props = {
   source: "live" | "stale" | "error" | "partial";
+  sourceMode: SourceMode;
   loading: boolean;
   lastUpdated: string;
   warning?: string;
@@ -29,6 +31,7 @@ function formatTime(iso: string): string {
 
 export default function DataSourceBadge({
   source,
+  sourceMode,
   loading,
   lastUpdated,
   warning,
@@ -37,10 +40,14 @@ export default function DataSourceBadge({
 }: Props) {
   const { t } = useTranslation();
   const isLive = source === "live" || source === "partial";
+  const isProxy = sourceMode === "proxy";
+  const showOperationalWarning = source === "partial" || source === "stale" || source === "error";
 
-  const sourceLabel = isLive
-    ? `${t("dataSource.live")} — ${provider ?? "Binance"}`
-    : t("dataSource.offline");
+  const sourceLabel = isProxy
+    ? `${t("dataSource.proxy")} — ${provider ?? "Proxy"}`
+    : isLive
+      ? `${t("dataSource.live")} — ${provider ?? "Binance"}`
+      : t("dataSource.offline");
 
   return (
     <div className="data-source-bar" role="status" aria-live="polite">
@@ -67,7 +74,7 @@ export default function DataSourceBadge({
       {proxyWarning && (
         <div className="source-warning source-proxy-warning">⚠ {proxyWarning}</div>
       )}
-      {warning && !isLive && (
+      {warning && showOperationalWarning && (
         <div className="source-warning">{warning}</div>
       )}
     </div>

@@ -34,4 +34,5 @@ export const FETCH_COUNTS: Record<Timeframe, number> = {
   "8H":  100,
   "12H": 100,
   "1D":  100,
+  "1W":  80,
 };

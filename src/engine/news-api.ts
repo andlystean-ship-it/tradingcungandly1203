@@ -5,9 +5,8 @@
  * Primary source: CryptoPanic API (free tier, no key required for public feed)
  * Shared helper module for sentiment scoring and lightweight live fetch.
  *
- * Sentiment is scored deterministically from keyword analysis:
- *   - Positive keywords: bullish, surge, rally, pump, breakout, accumulation, support, inflows
- *   - Negative keywords: bearish, crash, dump, sell-off, resistance, outflows, liquidation
+ * Sentiment is scored deterministically from weighted phrases.
+ * Pure technical-location words like support/resistance are not directional by themselves.
  *   - Score range: 0–100 (50 = neutral)
  */
 
@@ -15,40 +14,114 @@ import type { NewsItem, Symbol, Bias } from "../types";
 
 const CRYPTOPANIC_BASE = "https://cryptopanic.com/api/free/v1/posts/";
 
-// Keyword-based sentiment analysis
-const BULLISH_KEYWORDS = [
-  "bullish", "surge", "rally", "pump", "breakout", "accumulation",
-  "support", "inflows", "buy", "upside", "gain", "tăng", "tích cực",
-  "hỗ trợ", "tích lũy", "mua", "tăng giá", "đột phá", "higher",
-  "upgrade", "adoption", "approval", "etf", "institutional",
+type WeightedPhrase = { phrase: string; weight: number };
+
+const BULLISH_PHRASES: WeightedPhrase[] = [
+  { phrase: "bullish", weight: 2.0 },
+  { phrase: "surge", weight: 1.4 },
+  { phrase: "rally", weight: 1.4 },
+  { phrase: "pump", weight: 1.2 },
+  { phrase: "breakout", weight: 1.8 },
+  { phrase: "accumulation", weight: 1.5 },
+  { phrase: "inflows", weight: 1.5 },
+  { phrase: "buy", weight: 1.0 },
+  { phrase: "upside", weight: 1.1 },
+  { phrase: "gain", weight: 1.0 },
+  { phrase: "higher", weight: 0.9 },
+  { phrase: "upgrade", weight: 1.0 },
+  { phrase: "adoption", weight: 1.4 },
+  { phrase: "approval", weight: 1.5 },
+  { phrase: "etf inflows", weight: 2.0 },
+  { phrase: "institutional adoption", weight: 2.0 },
+  { phrase: "holds support", weight: 1.2 },
+  { phrase: "reclaims support", weight: 1.6 },
+  { phrase: "breaks resistance", weight: 1.8 },
+  { phrase: "tăng", weight: 1.1 },
+  { phrase: "tích cực", weight: 1.4 },
+  { phrase: "hỗ trợ", weight: 0.6 },
+  { phrase: "tích lũy", weight: 1.4 },
+  { phrase: "mua", weight: 1.0 },
+  { phrase: "tăng giá", weight: 1.5 },
+  { phrase: "đột phá", weight: 1.8 },
 ];
 
-const BEARISH_KEYWORDS = [
-  "bearish", "crash", "dump", "sell", "selloff", "sell-off",
-  "resistance", "outflows", "liquidation", "decline", "drop",
-  "giảm", "tiêu cực", "sụt", "bán", "kháng cự", "rủi ro",
-  "ban", "hack", "exploit", "regulation", "crackdown", "lower",
+const BEARISH_PHRASES: WeightedPhrase[] = [
+  { phrase: "bearish", weight: 2.0 },
+  { phrase: "crash", weight: 1.8 },
+  { phrase: "dump", weight: 1.6 },
+  { phrase: "sell", weight: 1.0 },
+  { phrase: "selloff", weight: 1.6 },
+  { phrase: "sell-off", weight: 1.6 },
+  { phrase: "outflows", weight: 1.5 },
+  { phrase: "liquidation", weight: 1.7 },
+  { phrase: "decline", weight: 1.2 },
+  { phrase: "drop", weight: 1.2 },
+  { phrase: "breaks support", weight: 1.9 },
+  { phrase: "rejected at resistance", weight: 1.7 },
+  { phrase: "fails at resistance", weight: 1.6 },
+  { phrase: "lower", weight: 0.9 },
+  { phrase: "giảm", weight: 1.2 },
+  { phrase: "tiêu cực", weight: 1.4 },
+  { phrase: "sụt", weight: 1.2 },
+  { phrase: "bán", weight: 1.0 },
+  { phrase: "kháng cự", weight: 0.6 },
+  { phrase: "rủi ro", weight: 1.0 },
+  { phrase: "ban", weight: 1.3 },
+  { phrase: "hack", weight: 1.5 },
+  { phrase: "exploit", weight: 1.5 },
+  { phrase: "regulation", weight: 1.2 },
+  { phrase: "crackdown", weight: 1.6 },
 ];
+
+const NEUTRAL_TECHNICAL_PHRASES = [
+  "tests support",
+  "near support",
+  "at support",
+  "tests resistance",
+  "near resistance",
+  "at resistance",
+  "kháng cự quan trọng",
+  "kiểm tra hỗ trợ",
+];
+
+function countOccurrences(text: string, phrase: string): number {
+  if (!phrase) return 0;
+  return text.split(phrase).length - 1;
+}
+
+function weightedHits(text: string, phrases: WeightedPhrase[]): number {
+  let total = 0;
+  for (const { phrase, weight } of phrases) {
+    const occurrences = countOccurrences(text, phrase);
+    if (occurrences > 0) total += occurrences * weight;
+  }
+  return total;
+}
 
 /** Score an article's sentiment from its text (0–100, 50 = neutral) */
 export function scoreSentiment(text: string): { score: number; label: Bias } {
   const lower = text.toLowerCase();
-  let bullishHits = 0;
-  let bearishHits = 0;
+  let bullishHits = weightedHits(lower, BULLISH_PHRASES);
+  let bearishHits = weightedHits(lower, BEARISH_PHRASES);
 
-  for (const kw of BULLISH_KEYWORDS) {
-    if (lower.includes(kw)) bullishHits++;
+  for (const phrase of NEUTRAL_TECHNICAL_PHRASES) {
+    if (lower.includes(phrase)) {
+      bullishHits = Math.max(0, bullishHits - 0.8);
+      bearishHits = Math.max(0, bearishHits - 0.8);
+    }
   }
-  for (const kw of BEARISH_KEYWORDS) {
-    if (lower.includes(kw)) bearishHits++;
+
+  if (/\bsupport\b/.test(lower) && !/(holds support|reclaims support|breaks support|near support|at support|tests support)/.test(lower)) {
+    bullishHits = Math.max(0, bullishHits - 0.6);
+  }
+  if (/\bresistance\b/.test(lower) && !/(breaks resistance|rejected at resistance|fails at resistance|near resistance|at resistance|tests resistance)/.test(lower)) {
+    bearishHits = Math.max(0, bearishHits - 0.6);
   }
 
   const total = bullishHits + bearishHits;
   if (total === 0) return { score: 50, label: "neutral" };
 
-  // Weighted toward 50 (neutral center)
   const rawScore = (bullishHits / total) * 100;
-  // Dampen toward center: score = 50 + (raw - 50) * confidence
   const confidence = Math.min(total / 6, 1); // max confidence at 6+ hits
   const score = Math.round(50 + (rawScore - 50) * confidence);
 
@@ -119,6 +192,8 @@ export async function fetchNews(symbol: Symbol): Promise<NewsItem[]> {
       return {
         id: `live-${post.id || i}`,
         source: post.source?.title || "CryptoPanic",
+        sourceAttribution: "via CryptoPanic",
+        sourceProvider: "cryptopanic",
         publishedAt,
         title: post.title,
         summary: post.title, // Free API doesn't include body
@@ -126,6 +201,7 @@ export async function fetchNews(symbol: Symbol): Promise<NewsItem[]> {
         sentimentLabel: sentiment.label,
         sentimentScore: sentiment.score,
         hasTargetPrice: false,
+        sourceMode: "live",
       };
     });
 

@@ -43,7 +43,7 @@ export function computeBias(
   );
   const htfSignals = signals.filter(s =>
     s.timeframe === "4H" || s.timeframe === "6H" || s.timeframe === "8H" ||
-    s.timeframe === "12H" || s.timeframe === "1D"
+    s.timeframe === "12H" || s.timeframe === "1D" || s.timeframe === "1W"
   );
 
   const ltfBullishAvg = ltfSignals.length > 0
@@ -171,11 +171,21 @@ export function computeBias(
     neutralReason,
   };
 
+  const conflictFlags: string[] = [];
+  if (hasConflict) conflictFlags.push("ltf_htf_divergence");
+  if (pivotProximityPenalty >= 10) conflictFlags.push("near_pivot");
+  if (context?.trendContext?.alignment === "mixed") conflictFlags.push("mixed_trend_alignment");
+  if (trendPressurePenalty >= 10) conflictFlags.push("trend_pressure_opposes_bias");
+
+  const htfAgreement = Math.max(0, Math.min(100, Math.round(100 - conflictLevel)));
+
   return {
     bullishPercent,
     bearishPercent,
     dominantSide,
     confidence,
+    conflictFlags,
+    htfAgreement,
     debug,
   };
 }

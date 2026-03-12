@@ -6,40 +6,20 @@
  * Pressure model uses proximity, momentum, recent breaks/retests, and HTF dominance.
  */
 
-import type { CandleData, Trendline, Timeframe, TrendPressure } from "../types";
+import type {
+  CandleData,
+  Trendline,
+  Timeframe,
+  TrendPressure,
+  TrendContext,
+  TrendLayer,
+  TrendDirection,
+  TrendAlignment,
+} from "../types";
 import { buildTrendlines } from "./trendlines";
+import { computeEMAState } from "./ema";
 import { lastEMA } from "./candles";
-
-// ── Types ────────────────────────────────────────────────────────────────────
-
-export type TrendDirection = "bullish" | "bearish" | "neutral";
-export type TrendAlignment =
-  | "aligned_bullish"
-  | "aligned_bearish"
-  | "mixed"
-  | "neutral";
-
-export type TrendLayer = {
-  direction: TrendDirection;
-  activeTrendlines: Trendline[];
-  dominantLine: Trendline | null;
-  strength: number; // 0–100
-};
-
-export type TrendContext = {
-  shortTerm: TrendLayer;
-  mediumTerm: TrendLayer;
-  higherTimeframe: TrendLayer;
-  alignment: TrendAlignment;
-  /** Aggregate trend pressure near current price (P4) */
-  pressure?: TrendPressure;
-  /** EMA crossover signal (50/200) on 1H candles */
-  emaCrossover?: {
-    direction: TrendDirection;
-    ema50: number;
-    ema200: number;
-  };
-};
+import { deriveSwingStructureState } from "./structure";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -47,11 +27,62 @@ export type TrendContext = {
  * Build a trend layer using slope × span × strength weighted scoring.
  * A strong, long ascending line with steep slope outweighs multiple weak short ones.
  */
-function buildLayer(trendlines: Trendline[]): TrendLayer {
+function derivePressureState(
+  candles: CandleData[],
+  dominantLine: Trendline | null,
+  direction: TrendDirection,
+): NonNullable<TrendLayer["pressureState"]> {
+  if (!dominantLine || candles.length === 0 || dominantLine.x2 === dominantLine.x1) return "neutral";
+  const lastIdx = candles.length - 1;
+  const currentPrice = candles[lastIdx].close;
+  const projected = dominantLine.y1 + ((dominantLine.y2 - dominantLine.y1) / (dominantLine.x2 - dominantLine.x1)) * (lastIdx - dominantLine.x1);
+  const atr = candles.slice(-14).reduce((sum, candle) => sum + (candle.high - candle.low), 0) / Math.max(1, Math.min(14, candles.length));
+  if (!atr) return "neutral";
+  const distanceInAtr = Math.abs(currentPrice - projected) / atr;
+  if (distanceInAtr > 0.75) return direction === "neutral" ? "neutral" : "balanced";
+  if (dominantLine.kind === "ascending" && currentPrice >= projected) return "compressed_support";
+  if (dominantLine.kind === "descending" && currentPrice <= projected) return "compressed_resistance";
+  return direction === "neutral" ? "neutral" : "balanced";
+}
+
+function buildRationale(
+  structureState: NonNullable<TrendLayer["structureState"]>,
+  trendlineState: NonNullable<TrendLayer["trendlineState"]>,
+  emaState: NonNullable<TrendLayer["emaState"]>,
+  pressureState: NonNullable<TrendLayer["pressureState"]>,
+  dominantLine: Trendline | null,
+): string[] {
+  const rationale: string[] = [];
+  if (structureState === "bullish") rationale.push("structure HH/HL");
+  if (structureState === "bearish") rationale.push("structure LH/LL");
+  if (structureState === "mixed") rationale.push("structure mixed");
+  if (trendlineState === "bullish") rationale.push("trendline support dominant");
+  if (trendlineState === "bearish") rationale.push("trendline resistance dominant");
+  if (emaState === "bullish") rationale.push("ema stack bullish");
+  if (emaState === "bearish") rationale.push("ema stack bearish");
+  if (pressureState === "compressed_support") rationale.push("price compressed above support");
+  if (pressureState === "compressed_resistance") rationale.push("price compressed below resistance");
+  if (dominantLine) rationale.push(`dominant ${dominantLine.kind} line`);
+  return rationale.length > 0 ? rationale : ["no strong trend evidence"];
+}
+
+function buildLayer(trendlines: Trendline[], candles: CandleData[]): TrendLayer {
   const active = trendlines.filter(t => t.active);
 
   if (active.length === 0) {
-    return { direction: "neutral", activeTrendlines: [], dominantLine: null, strength: 0 };
+    const structureState = deriveSwingStructureState(candles);
+    const emaState = candles.length >= 20 ? computeEMAState(candles).direction : "neutral";
+    return {
+      direction: "neutral",
+      activeTrendlines: [],
+      dominantLine: null,
+      strength: 0,
+      structureState,
+      trendlineState: "neutral",
+      emaState,
+      pressureState: "neutral",
+      rationale: buildRationale(structureState, "neutral", emaState, "neutral", null),
+    };
   }
 
   let netScore = 0;
@@ -85,8 +116,22 @@ function buildLayer(trendlines: Trendline[]): TrendLayer {
   else if (balance < -0.12) direction = "bearish";
 
   const strength = Math.max(0, Math.min(100, Math.round(Math.abs(balance) * 100)));
+  const structureState = deriveSwingStructureState(candles);
+  const emaState = candles.length >= 20 ? computeEMAState(candles).direction : "neutral";
+  const trendlineState: NonNullable<TrendLayer["trendlineState"]> = direction === "bullish" ? "bullish" : direction === "bearish" ? "bearish" : "neutral";
+  const pressureState = derivePressureState(candles, dominantLine, direction);
 
-  return { direction, activeTrendlines: active, dominantLine, strength };
+  return {
+    direction,
+    activeTrendlines: active,
+    dominantLine,
+    strength,
+    structureState,
+    trendlineState,
+    emaState,
+    pressureState,
+    rationale: buildRationale(structureState, trendlineState, emaState, pressureState, dominantLine),
+  };
 }
 
 function computeAlignment(
@@ -315,7 +360,8 @@ export function buildTrendContext(
   // Short term: 1H trendlines (use provided chart trendlines or rebuild)
   const shortTermLines =
     chartTrendlines ?? buildTrendlines(candleMap["1H"] ?? [], "1H");
-  const shortTerm = buildLayer(shortTermLines);
+  const shortTermCandles = candleMap["1H"] ?? [];
+  const shortTerm = buildLayer(shortTermLines, shortTermCandles);
 
   // Medium term: 4H trendlines
   const mediumTermCandles = candleMap["4H"];
@@ -323,9 +369,9 @@ export function buildTrendContext(
     mediumTermCandles && mediumTermCandles.length >= 15
       ? buildTrendlines(mediumTermCandles, "4H")
       : [];
-  const mediumTerm = buildLayer(mediumTermLines);
+  const mediumTerm = buildLayer(mediumTermLines, mediumTermCandles ?? []);
 
-  // Higher timeframe: 12H + 1D trendlines combined
+  // Higher timeframe: 12H + 1D + 1W trendlines combined
   const htfLines: Trendline[] = [];
   const candles12H = candleMap["12H"];
   if (candles12H && candles12H.length >= 15) {
@@ -335,7 +381,12 @@ export function buildTrendContext(
   if (candles1D && candles1D.length >= 15) {
     htfLines.push(...buildTrendlines(candles1D, "1D"));
   }
-  const higherTimeframe = buildLayer(htfLines);
+  const candles1W = candleMap["1W"];
+  if (candles1W && candles1W.length >= 15) {
+    htfLines.push(...buildTrendlines(candles1W, "1W"));
+  }
+  const higherAnchorCandles = candles1W ?? candles1D ?? candles12H ?? [];
+  const higherTimeframe = buildLayer(htfLines, higherAnchorCandles);
 
   const alignment = computeAlignment(shortTerm, mediumTerm, higherTimeframe);
 
@@ -372,5 +423,15 @@ export function buildTrendContext(
     }
   }
 
-  return { shortTerm, mediumTerm, higherTimeframe, alignment: finalAlignment, pressure, emaCrossover };
+  return {
+    shortTerm,
+    mediumTerm,
+    higherTimeframe,
+    alignment: finalAlignment,
+    pressure,
+    emaCrossover,
+    shortTermTrend: shortTerm.direction,
+    mediumTermTrend: mediumTerm.direction,
+    higherTimeframeTrend: higherTimeframe.direction,
+  };
 }
