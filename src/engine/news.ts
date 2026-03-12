@@ -5,11 +5,13 @@
  * Rules:
  * - News does not generate core signals
  * - News may adjust display context / caution text
- * - XAU and BTC news are handled separately
+ * - Primary source: CryptoPanic API (via news-api.ts)
+ * - Fallback: static news arrays below
  * - Sentiment values are deterministic (no random)
  */
 
 import type { NewsItem, Symbol } from "../types";
+import { fetchNews as fetchLiveNews } from "./news-api";
 
 const XAU_NEWS: NewsItem[] = [
   {
@@ -149,8 +151,31 @@ const GENERIC_NEWS: NewsItem[] = [
   },
 ];
 
+/** Synchronous static news fallback */
 export function getNews(symbol: Symbol): NewsItem[] {
   if (symbol === "XAU/USDT") return XAU_NEWS;
   if (symbol === "BTC/USDT") return BTC_NEWS;
   return GENERIC_NEWS;
+}
+
+/**
+ * Async news fetcher — tries CryptoPanic API first, falls back to static.
+ * Results are cached for 5 minutes per symbol to avoid quota exhaustion.
+ */
+const newsCache = new Map<string, { items: NewsItem[]; ts: number }>();
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+export async function getNewsAsync(symbol: Symbol): Promise<NewsItem[]> {
+  const cached = newsCache.get(symbol);
+  if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
+    return cached.items;
+  }
+
+  try {
+    const items = await fetchLiveNews(symbol);
+    newsCache.set(symbol, { items, ts: Date.now() });
+    return items;
+  } catch {
+    return getNews(symbol);
+  }
 }

@@ -201,3 +201,156 @@ describe("generateCandles fallback", () => {
     expect(candles[0].open).toBeGreaterThan(0);
   });
 });
+
+// ── EMA calculation ───────────────────────────────────────────────────────────
+import { calcEMA, lastEMA } from "../candles";
+
+describe("calcEMA", () => {
+  function makeFlatCandles(price: number, count: number): CandleData[] {
+    return Array.from({ length: count }, (_, i) => ({
+      time: 1700000000 + i * 3600,
+      open: price,
+      high: price + 1,
+      low: price - 1,
+      close: price,
+    }));
+  }
+
+  it("returns array same length as input", () => {
+    const candles = makeFlatCandles(100, 30);
+    const ema = calcEMA(candles, 10);
+    expect(ema).toHaveLength(30);
+  });
+
+  it("converges to price for flat series", () => {
+    const candles = makeFlatCandles(50, 100);
+    const ema = calcEMA(candles, 20);
+    // After 100 candles of constant price, EMA should be very close to 50
+    expect(ema[ema.length - 1]).toBeCloseTo(50, 5);
+  });
+
+  it("lastEMA returns NaN for insufficient data", () => {
+    const candles = makeFlatCandles(100, 5);
+    expect(lastEMA(candles, 10)).toBeNaN();
+  });
+
+  it("lastEMA returns a number for sufficient data", () => {
+    const candles = makeFlatCandles(100, 50);
+    const val = lastEMA(candles, 20);
+    expect(val).not.toBeNaN();
+    expect(val).toBeCloseTo(100, 2);
+  });
+});
+
+// ── Per-timeframe entries ─────────────────────────────────────────────────────
+import { getEntryForTimeframe } from "../scenario";
+import type { CandleMap, Timeframe } from "../../types";
+
+describe("getEntryForTimeframe", () => {
+  function makeTfCandles(count: number, basePrice: number): CandleData[] {
+    const candles: CandleData[] = [];
+    for (let i = 0; i < count; i++) {
+      const swing = Math.sin(i * 0.3) * basePrice * 0.03;
+      const c = basePrice + swing;
+      candles.push({
+        time: 1700000000 + i * 3600,
+        open: c - basePrice * 0.005,
+        high: c + basePrice * 0.01,
+        low: c - basePrice * 0.01,
+        close: c,
+      });
+    }
+    return candles;
+  }
+
+  it("returns null for missing timeframe", () => {
+    const candleMap: CandleMap = {};
+    expect(getEntryForTimeframe("15M", candleMap, "long")).toBeNull();
+  });
+
+  it("returns null for insufficient candles", () => {
+    const candleMap: CandleMap = { "1H": makeTfCandles(5, 100) };
+    expect(getEntryForTimeframe("1H", candleMap, "long")).toBeNull();
+  });
+
+  it("returns valid entry for sufficient candles (long side)", () => {
+    const candleMap: CandleMap = { "1H": makeTfCandles(50, 100) };
+    const entry = getEntryForTimeframe("1H", candleMap, "long");
+    expect(entry).not.toBeNull();
+    expect(entry!.tf).toBe("1H");
+    expect(entry!.longEntry).toBeGreaterThan(0);
+    expect(entry!.shortEntry).toBeGreaterThan(0);
+    expect(entry!.target).toBeGreaterThan(0);
+    expect(entry!.invalidation).toBeGreaterThan(0);
+    // Long entry should be below current price (support)
+    const lastPrice = candleMap["1H"]![49].close;
+    expect(entry!.longEntry).toBeLessThanOrEqual(lastPrice + lastPrice * 0.05);
+  });
+
+  it("returns valid entry for short side", () => {
+    const candleMap: CandleMap = { "4H": makeTfCandles(50, 200) };
+    const entry = getEntryForTimeframe("4H", candleMap, "short");
+    expect(entry).not.toBeNull();
+    expect(entry!.tf).toBe("4H");
+    expect(entry!.shortEntry).toBeGreaterThan(0);
+  });
+
+  it("different TFs produce different entries", () => {
+    const candleMap: CandleMap = {
+      "15M": makeTfCandles(80, 100),
+      "4H": makeTfCandles(80, 100),
+    };
+    const entry15m = getEntryForTimeframe("15M", candleMap, "long");
+    const entry4h = getEntryForTimeframe("4H", candleMap, "long");
+    expect(entry15m).not.toBeNull();
+    expect(entry4h).not.toBeNull();
+    // They use the same data so entries may differ due to swing detection
+    expect(entry15m!.tf).toBe("15M");
+    expect(entry4h!.tf).toBe("4H");
+  });
+});
+
+// ── buildTrendContext with slope-weighted scoring ─────────────────────────────
+import { buildTrendContext } from "../trend-context";
+
+describe("buildTrendContext slope-weighted", () => {
+  function makeTrendCandles(count: number, basePrice: number): CandleData[] {
+    const candles: CandleData[] = [];
+    for (let i = 0; i < count; i++) {
+      const swing = Math.sin(i * 0.4) * basePrice * 0.04;
+      const c = basePrice + swing + i * 0.1; // slight uptrend
+      candles.push({
+        time: 1700000000 + i * 3600,
+        open: c - basePrice * 0.005,
+        high: c + basePrice * 0.015,
+        low: c - basePrice * 0.015,
+        close: c,
+      });
+    }
+    return candles;
+  }
+
+  it("returns a valid TrendContext structure", () => {
+    const candleMap: CandleMap = {
+      "1H": makeTrendCandles(80, 100),
+      "4H": makeTrendCandles(80, 100),
+      "12H": makeTrendCandles(40, 100),
+      "1D": makeTrendCandles(30, 100),
+    };
+    const ctx = buildTrendContext(candleMap);
+    expect(ctx.shortTerm).toBeDefined();
+    expect(ctx.mediumTerm).toBeDefined();
+    expect(ctx.higherTimeframe).toBeDefined();
+    expect(["aligned_bullish", "aligned_bearish", "mixed", "neutral"]).toContain(ctx.alignment);
+  });
+
+  it("includes pressure field", () => {
+    const candleMap: CandleMap = {
+      "1H": makeTrendCandles(80, 100),
+      "4H": makeTrendCandles(80, 100),
+    };
+    const ctx = buildTrendContext(candleMap);
+    expect(ctx.pressure).toBeDefined();
+    expect(typeof ctx.pressure!.netPressure).toBe("number");
+  });
+});

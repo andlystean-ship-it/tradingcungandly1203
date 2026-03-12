@@ -120,3 +120,28 @@ export function buildCandleMap(
   }
   return map;
 }
+
+// ── EMA (Exponential Moving Average) ──────────────────────────────────────────
+
+/**
+ * Calculate EMA on close prices.
+ * Returns the full EMA array (same length as input, first value = first close).
+ */
+export function calcEMA(candles: CandleData[], period: number): number[] {
+  if (candles.length === 0) return [];
+  const k = 2 / (period + 1);
+  const ema: number[] = [candles[0].close];
+  for (let i = 1; i < candles.length; i++) {
+    ema.push(candles[i].close * k + ema[i - 1] * (1 - k));
+  }
+  return ema;
+}
+
+/**
+ * Return the last EMA value for the given period, or NaN if insufficient data.
+ */
+export function lastEMA(candles: CandleData[], period: number): number {
+  if (candles.length < period) return NaN;
+  const arr = calcEMA(candles, period);
+  return arr[arr.length - 1];
+}

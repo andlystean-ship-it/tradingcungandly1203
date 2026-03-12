@@ -2,8 +2,7 @@ import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import "./App.css";
 import type { Symbol, Direction, NewsItem } from "./types";
-import { getNews } from "./engine/index";
-import { fetchNews } from "./engine/news-api";
+import { getNews, getNewsAsync } from "./engine/index";
 import { useEngine } from "./hooks/useEngine";
 import { useSettings } from "./hooks/useSettings";
 import { useAlerts } from "./hooks/useAlerts";
@@ -47,10 +46,10 @@ export default function App() {
     setLastSymbol(s);
   };
 
-  // Fetch live news (falls back to static on error)
+  // Fetch live news (falls back to static on error, cached 5 min)
   useEffect(() => {
     let cancelled = false;
-    fetchNews(symbol).then((items) => {
+    getNewsAsync(symbol).then((items) => {
       if (!cancelled) setNews(items);
     });
     return () => { cancelled = true; };
@@ -101,7 +100,7 @@ export default function App() {
         proxyWarning={engine.dataStatus.proxyWarning}
       />
       <BiasBar bias={engine.marketBias} />
-      <TimeframeStrip signals={engine.timeframeSignals} />
+      <TimeframeStrip signals={engine.timeframeSignals} entriesByTF={engine.marketScenario.entriesByTF} />
       <MainChart
         candleMap={engine.candleMap}
         scenario={engine.marketScenario}

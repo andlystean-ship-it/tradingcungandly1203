@@ -337,6 +337,29 @@ html, body, #root {
   line-height: 1.2;
 }
 
+.tf-card.has-entry {
+  border-bottom: 2px solid var(--neon-cyan);
+}
+
+.tf-entry-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 4px;
+  margin-top: 2px;
+  padding-top: 2px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 8px;
+  font-family: var(--font-mono);
+}
+
+.tf-long-entry {
+  color: var(--text-green);
+}
+
+.tf-short-entry {
+  color: var(--text-red);
+}
+
 /* ── CHART SECTION ── */
 .chart-section {
   width: 100%;

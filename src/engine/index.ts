@@ -32,7 +32,7 @@ import { buildTrendContext } from "./trend-context";
 import { WINDOWS } from "./windows";
 import type { SwingConfig } from "./swings";
 
-export { getNews } from "./news";
+export { getNews, getNewsAsync } from "./news";
 
 /** User-configurable engine parameters */
 export type EngineConfig = {

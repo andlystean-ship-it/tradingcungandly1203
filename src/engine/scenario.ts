@@ -34,9 +34,11 @@ import type {
   TrendContext,
   TrendAlignment,
   EntryQuality,
+  TimeframeEntry,
 } from "../types";
 import { calcPivot, nearestSupport, nearestResistance } from "./pivot";
 import { detectSwingHighs, detectSwingLows } from "./swings";
+import { buildTrendlines } from "./trendlines";
 import { ENTRY_QUALITY } from "./score-config";
 import i18n from "../i18n";
 
@@ -592,6 +594,107 @@ function assessEntryQuality(
   return { tradeable, rewardRisk, confluences, confluenceLabels, qualityScore, rejectReason, factors };
 }
 
+// ── Per-timeframe entry computation ───────────────────────────────────────────
+
+const ENTRY_TFS: Timeframe[] = ["15M", "1H", "4H"];
+
+/**
+ * Compute entry levels (long/short) for a single timeframe using that
+ * timeframe's own pivot, swing, and trendline structure.
+ *
+ * Lower timeframes produce tighter entries (closer support/resistance),
+ * while higher timeframes produce wider entries from stronger structure.
+ */
+export function getEntryForTimeframe(
+  tf: Timeframe,
+  candleMap: CandleMap,
+  primarySide: "long" | "short",
+): TimeframeEntry | null {
+  const candles = candleMap[tf];
+  if (!candles || candles.length < 10) return null;
+
+  const currentPrice = candles[candles.length - 1].close;
+  const levels = calcPivot(candles);
+  const minGap = currentPrice * 0.003;
+
+  // Swings from THIS timeframe only
+  const swingHighs = detectSwingHighs(candles, 3, 2);
+  const swingLows = detectSwingLows(candles, 3, 2);
+
+  // Trendlines from THIS timeframe
+  const tfTrendlines = buildTrendlines(candles, tf);
+
+  // Build local supports/resistances from swings
+  const supports = swingLows
+    .filter(s => s.price < currentPrice)
+    .sort((a, b) => b.price - a.price); // nearest first
+  const resistances = swingHighs
+    .filter(s => s.price > currentPrice)
+    .sort((a, b) => a.price - b.price); // nearest first
+
+  // Trendline projections
+  const lastIdx = candles.length - 1;
+  for (const tl of tfTrendlines) {
+    if (!tl.active || tl.x2 === tl.x1) continue;
+    const slope = (tl.y2 - tl.y1) / (tl.x2 - tl.x1);
+    const projected = tl.y1 + slope * (lastIdx - tl.x1);
+    if (projected < currentPrice) {
+      supports.push({ index: lastIdx, price: projected, significance: tl.strength } as any);
+    } else {
+      resistances.push({ index: lastIdx, price: projected, significance: tl.strength } as any);
+    }
+  }
+
+  const fix = (n: number) => Math.round(n * 100) / 100;
+
+  let longEntry: number;
+  let shortEntry: number;
+  let target: number;
+  let invalidation: number;
+  let longReason: string;
+  let shortReason: string;
+
+  if (primarySide === "long") {
+    longEntry = supports.length > 0 ? supports[0].price : nearestSupport(levels, currentPrice);
+    longReason = supports.length > 0 ? `swing-${tf}` : `pivot-${tf}`;
+
+    target = resistances.length > 0 ? resistances[0].price : nearestResistance(levels, currentPrice);
+    target = Math.max(target, longEntry + minGap * 3);
+
+    shortEntry = resistances.length > 1
+      ? Math.max(resistances[1].price, target + minGap * 3)
+      : levels.r2;
+    shortReason = resistances.length > 1 ? `swing-${tf}` : `pivot-${tf}-R2`;
+
+    const deepSupport = supports.length > 1 ? supports[1].price : levels.s2;
+    invalidation = Math.min(deepSupport, longEntry - minGap * 2);
+  } else {
+    shortEntry = resistances.length > 0 ? resistances[0].price : nearestResistance(levels, currentPrice);
+    shortReason = resistances.length > 0 ? `swing-${tf}` : `pivot-${tf}`;
+
+    target = supports.length > 0 ? supports[0].price : nearestSupport(levels, currentPrice);
+    target = Math.min(target, shortEntry - minGap * 3);
+
+    longEntry = supports.length > 1
+      ? Math.min(supports[1].price, target - minGap * 3)
+      : levels.s2;
+    longReason = supports.length > 1 ? `swing-${tf}` : `pivot-${tf}-S2`;
+
+    const deepResistance = resistances.length > 1 ? resistances[1].price : levels.r2;
+    invalidation = Math.max(deepResistance, shortEntry + minGap * 2);
+  }
+
+  return {
+    tf,
+    longEntry: fix(longEntry),
+    shortEntry: fix(shortEntry),
+    target: fix(target),
+    invalidation: fix(invalidation),
+    longReason,
+    shortReason,
+  };
+}
+
 // ── Main scenario builder ─────────────────────────────────────────────────────
 export function buildScenario(input: ScenarioInput): MarketScenario {
   const { candleMap, timeframeSignals, marketBias, chartTrendlines, trendContext, symbol } = input;
@@ -843,5 +946,19 @@ export function buildScenario(input: ScenarioInput): MarketScenario {
     alternateQuality: alternateEntryQuality,
     primaryScenarioIsActionable,
     primaryRejectReason,
+    entriesByTF: computeEntriesByTF(candleMap, leanDirection),
   };
+}
+
+/** Compute per-timeframe entries for key timeframes (15M, 1H, 4H). */
+function computeEntriesByTF(
+  candleMap: CandleMap,
+  primarySide: "long" | "short",
+): TimeframeEntry[] {
+  const entries: TimeframeEntry[] = [];
+  for (const tf of ENTRY_TFS) {
+    const entry = getEntryForTimeframe(tf, candleMap, primarySide);
+    if (entry) entries.push(entry);
+  }
+  return entries;
 }

@@ -8,6 +8,7 @@
 
 import type { CandleData, Trendline, Timeframe, TrendPressure } from "../types";
 import { buildTrendlines } from "./trendlines";
+import { lastEMA } from "./candles";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -30,13 +31,21 @@ export type TrendContext = {
   mediumTerm: TrendLayer;
   higherTimeframe: TrendLayer;
   alignment: TrendAlignment;
+  /** Aggregate trend pressure near current price (P4) */
+  pressure?: TrendPressure;
+  /** EMA crossover signal (50/200) on 1H candles */
+  emaCrossover?: {
+    direction: TrendDirection;
+    ema50: number;
+    ema200: number;
+  };
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
- * Build a trend layer using strength-weighted scoring, not line counting.
- * A single strong ascending line outweighs two weak descending ones.
+ * Build a trend layer using slope × span × strength weighted scoring.
+ * A strong, long ascending line with steep slope outweighs multiple weak short ones.
  */
 function buildLayer(trendlines: Trendline[]): TrendLayer {
   const active = trendlines.filter(t => t.active);
@@ -45,7 +54,7 @@ function buildLayer(trendlines: Trendline[]): TrendLayer {
     return { direction: "neutral", activeTrendlines: [], dominantLine: null, strength: 0 };
   }
 
-  // Strength-weighted directional scoring
+  // Slope × span × strength weighted directional scoring
   let ascScore = 0;
   let descScore = 0;
   for (const t of active) {
@@ -54,7 +63,15 @@ function buildLayer(trendlines: Trendline[]): TrendLayer {
     const touchBonus = Math.min(20, (t.touchCount ?? 1) * 5);
     // Penalize lines with violations
     const violationPenalty = Math.min(30, (t.violationCount ?? 0) * 10);
-    const effectiveStrength = Math.max(0, s + touchBonus - violationPenalty);
+
+    // Slope magnitude: steeper = stronger directional signal
+    const slopeMag = Math.abs(t.slope ?? 0);
+    const slopeFactor = Math.min(2.0, 0.5 + slopeMag * 500); // clamp at 2x
+
+    // Span: longer lines are more reliable
+    const spanFactor = Math.min(2.0, 0.5 + (t.span ?? 10) / 30);
+
+    const effectiveStrength = Math.max(0, (s + touchBonus - violationPenalty) * slopeFactor * spanFactor);
 
     if (t.kind === "ascending") ascScore += effectiveStrength;
     else descScore += effectiveStrength;
@@ -330,5 +347,34 @@ export function buildTrendContext(
   const allLines = [...shortTermLines, ...mediumTermLines, ...htfLines];
   const pressure = computeTrendPressure(candleMap, allLines, higherTimeframe);
 
-  return { shortTerm, mediumTerm, higherTimeframe, alignment, pressure };
+  // ── EMA crossover on 1H candles (EMA50 vs EMA200) ────────────────────────
+  const candles1H = candleMap["1H"];
+  let emaCrossover: TrendContext["emaCrossover"];
+  if (candles1H && candles1H.length >= 200) {
+    const ema50 = lastEMA(candles1H, 50);
+    const ema200 = lastEMA(candles1H, 200);
+    if (!isNaN(ema50) && !isNaN(ema200)) {
+      const diff = (ema50 - ema200) / ema200;
+      const direction: TrendDirection =
+        diff > 0.002 ? "bullish" : diff < -0.002 ? "bearish" : "neutral";
+      emaCrossover = { direction, ema50, ema200 };
+    }
+  }
+
+  // ── Refine alignment with EMA confirmation ────────────────────────────────
+  let finalAlignment = alignment;
+  if (emaCrossover && alignment === "mixed") {
+    // If EMA agrees with majority direction, upgrade from mixed
+    const bullCount = [shortTerm, mediumTerm, higherTimeframe]
+      .filter(l => l.direction === "bullish").length;
+    const bearCount = [shortTerm, mediumTerm, higherTimeframe]
+      .filter(l => l.direction === "bearish").length;
+    if (emaCrossover.direction === "bullish" && bullCount >= bearCount) {
+      finalAlignment = "aligned_bullish";
+    } else if (emaCrossover.direction === "bearish" && bearCount >= bullCount) {
+      finalAlignment = "aligned_bearish";
+    }
+  }
+
+  return { shortTerm, mediumTerm, higherTimeframe, alignment: finalAlignment, pressure, emaCrossover };
 }

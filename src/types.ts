@@ -90,6 +90,12 @@ export type TrendContext = {
   alignment: TrendAlignment;
   /** Aggregate trend pressure near current price (P4) */
   pressure?: TrendPressure;
+  /** EMA crossover signal per timeframe (50/200) */
+  emaCrossover?: {
+    direction: TrendDirection;
+    ema50: number;
+    ema200: number;
+  };
 };
 
 // ── Trend pressure model (P4) ────────────────────────────────────────────────
@@ -170,6 +176,17 @@ export type ScenarioSide = {
   rationale: string;
 };
 
+// ── Per-timeframe entry (distinct entry/target/invalidation per TF) ───────────
+export type TimeframeEntry = {
+  tf: Timeframe;
+  longEntry: number;
+  shortEntry: number;
+  target: number;
+  invalidation: number;
+  longReason: string;
+  shortReason: string;
+};
+
 // ── Full market scenario ──────────────────────────────────────────────────────
 export type MarketScenario = {
   symbol: Symbol;
@@ -204,6 +221,8 @@ export type MarketScenario = {
   primaryScenarioIsActionable: boolean;
   /** Why the primary scenario was rejected, if not actionable */
   primaryRejectReason?: string;
+  /** Per-timeframe entries with distinct S/R levels */
+  entriesByTF?: TimeframeEntry[];
 };
 
 // ── Data freshness ────────────────────────────────────────────────────────────
