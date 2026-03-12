@@ -125,16 +125,19 @@ export default function SettingsPanel({
             <input
               className="alert-input"
               type="number"
-              min={10}
+              min={1}
               max={600}
-              step={10}
+              step={1}
               value={engineConfig.refreshIntervalSec}
               onChange={e => {
                 const v = parseInt(e.target.value, 10);
-                if (!isNaN(v) && v >= 10 && v <= 600) onEngineConfigChange({ refreshIntervalSec: v });
+                if (!isNaN(v) && v >= 1 && v <= 600) onEngineConfigChange({ refreshIntervalSec: v });
               }}
               aria-label={t("engineConfig.refreshInterval")}
             />
+          </div>
+          <div style={{ fontSize: 11, color: "var(--text-muted)", paddingTop: 4 }}>
+            {t("engineConfig.refreshWarning")}
           </div>
         </div>
 

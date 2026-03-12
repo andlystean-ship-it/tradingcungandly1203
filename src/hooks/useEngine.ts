@@ -4,7 +4,8 @@
  *   - Fetches real Binance candles on mount and symbol change
  *   - Last-good-snapshot: keeps previous valid output during refresh/symbol-change
  *   - Marks data as stale if refresh fails (keeps last-good-snapshot)
- *   - Auto-refreshes on configurable interval (default 60s)
+ *   - Auto-refreshes on configurable interval (default 1s)
+ *   - Prevents overlapping refreshes when the previous request is still running
  *   - Accepts configurable engine parameters for swing/trendline tuning
  */
 
@@ -33,10 +34,10 @@ export type EngineState = {
 };
 
 /** Default refresh interval */
-const DEFAULT_REFRESH_SEC = 60;
+const DEFAULT_REFRESH_SEC = 1;
 
 export function useEngine(symbol: Symbol, config?: EngineConfig): EngineState {
-  const refreshInterval = (config?.refreshIntervalSec ?? DEFAULT_REFRESH_SEC) * 1000;
+  const refreshInterval = Math.max(1, config?.refreshIntervalSec ?? DEFAULT_REFRESH_SEC) * 1000;
 
   const [output, setOutput] = useState<EngineOutput | null>(null);
   const [loading, setLoading] = useState(true);
@@ -46,8 +47,11 @@ export function useEngine(symbol: Symbol, config?: EngineConfig): EngineState {
 
   const symbolRef = useRef(symbol);
   symbolRef.current = symbol;
+  const isRefreshingRef = useRef(false);
 
   const refresh = useCallback(async (isInitial: boolean) => {
+    if (isRefreshingRef.current) return;
+    isRefreshingRef.current = true;
     setLoading(true);
     try {
       const coreConfig: CoreEngineConfig | undefined =
@@ -76,6 +80,7 @@ export function useEngine(symbol: Symbol, config?: EngineConfig): EngineState {
         setIsStale(true);
       }
     } finally {
+      isRefreshingRef.current = false;
       setLoading(false);
       if (isInitial) setInitializing(false);
     }
@@ -90,20 +95,23 @@ export function useEngine(symbol: Symbol, config?: EngineConfig): EngineState {
     setError(null);
     setIsStale(false);
 
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
     const doRefresh = async (isInitial: boolean) => {
       if (cancelled) return;
       await refresh(isInitial);
+      if (!cancelled) {
+        timer = setTimeout(() => {
+          void doRefresh(false);
+        }, refreshInterval);
+      }
     };
 
     void doRefresh(true);
 
-    const interval = setInterval(() => {
-      if (!cancelled) void doRefresh(false);
-    }, refreshInterval);
-
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      if (timer) clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbol, refreshInterval]);

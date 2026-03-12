@@ -105,6 +105,7 @@
     "minSwingDistance": "Khoảng cách Swing tối thiểu",
     "minPriceSeparation": "Tách giá SR tối thiểu (%)",
     "refreshInterval": "Chu kỳ làm mới (giây)",
+    "refreshWarning": "Có thể đặt từ 1 giây. Giá trị quá nhỏ có thể làm tăng tải API và CPU, đặc biệt khi làm mới liên tục.",
     "srLevels": "Số mức S/R hiển thị"
   },
   "chart": {

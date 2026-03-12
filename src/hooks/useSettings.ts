@@ -38,10 +38,13 @@ export type Settings = {
 
 const STORAGE_KEY = "trading-settings";
 
+const MIN_REFRESH_SEC = 1;
+const MAX_REFRESH_SEC = 600;
+
 const DEFAULT_ENGINE_CONFIG: EngineConfig = {
   minSwingDistance: 5,
   minPriceSeparationPct: 0.3,
-  refreshIntervalSec: 60,
+  refreshIntervalSec: 1,
 };
 
 const DEFAULT_SETTINGS: Settings = {
@@ -57,10 +60,16 @@ function loadSettings(): Settings {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return DEFAULT_SETTINGS;
     const parsed = JSON.parse(raw) as Partial<Settings>;
+    const engineConfig = { ...DEFAULT_ENGINE_CONFIG, ...parsed.engineConfig };
+    engineConfig.refreshIntervalSec = Math.max(
+      MIN_REFRESH_SEC,
+      Math.min(MAX_REFRESH_SEC, engineConfig.refreshIntervalSec),
+    );
+
     return {
       ...DEFAULT_SETTINGS,
       ...parsed,
-      engineConfig: { ...DEFAULT_ENGINE_CONFIG, ...parsed.engineConfig },
+      engineConfig,
       alerts: Array.isArray(parsed.alerts) ? parsed.alerts : [],
     };
   } catch {
@@ -101,7 +110,14 @@ export function useSettings() {
   const setEngineConfig = useCallback((config: Partial<EngineConfig>) => {
     setSettings(s => ({
       ...s,
-      engineConfig: { ...s.engineConfig, ...config },
+      engineConfig: {
+        ...s.engineConfig,
+        ...config,
+        refreshIntervalSec: Math.max(
+          MIN_REFRESH_SEC,
+          Math.min(MAX_REFRESH_SEC, config.refreshIntervalSec ?? s.engineConfig.refreshIntervalSec),
+        ),
+      },
     }));
   }, []);
 
