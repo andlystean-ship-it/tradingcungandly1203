@@ -25,6 +25,8 @@ import { buildTrendlines } from "./trendlines";
 import { scoreTimeframe, TF_WEIGHTS, type HTFContext } from "./scoring";
 import { computeBias, type BiasContext } from "./bias";
 import { buildScenario, type ScenarioInput } from "./scenario";
+import { buildTrendContext } from "./trend-context";
+import { WINDOWS } from "./windows";
 
 export { getNews } from "./news";
 
@@ -45,12 +47,21 @@ function runPipeline(
 ): EngineOutput {
   const now = new Date().toISOString();
 
-  // 1H candles are the reference series for chart rendering and trendlines
-  const chartCandles = candleMap["1H"];
-  const currentPrice = chartCandles[chartCandles.length - 1].close;
+  // 1H candles — full series for structural analysis
+  const allChartCandles = candleMap["1H"];
+  const currentPrice = allChartCandles[allChartCandles.length - 1].close;
 
-  // Trendlines from 1H swing structure
-  const trendlines = buildTrendlines(chartCandles);
+  // Structural window: deeper slice for swing/trendline detection
+  const structureCandles = allChartCandles.slice(-WINDOWS.structure);
+
+  // Chart rendering window: only what the chart shows
+  const chartCandles = allChartCandles.slice(-WINDOWS.chartRender);
+
+  // Trendlines from the structural window (not the narrow chart window)
+  const trendlines = buildTrendlines(structureCandles, "1H");
+
+  // Build multi-timeframe trend context
+  const trendContext = buildTrendContext(candleMap, trendlines);
 
   // ── Two-pass scoring: HTF first, then LTF with htfContext ─────────────────
   const timeframes = Object.keys(TF_WEIGHTS) as Timeframe[];
@@ -88,6 +99,7 @@ function runPipeline(
     timeframeSignals,
     marketBias,
     chartTrendlines: trendlines,
+    trendContext,
     symbol,
   };
   const marketScenario = buildScenario(scenarioInput);
@@ -111,6 +123,7 @@ function runPipeline(
     marketBias,
     timeframeSignals,
     trendlines,
+    trendContext,
     marketScenario,
     dataStatus,
   };

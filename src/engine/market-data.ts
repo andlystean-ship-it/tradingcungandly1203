@@ -22,6 +22,7 @@
 
 import type { CandleData, Symbol, Timeframe } from "../types";
 import { generateCandles } from "./candles";
+import { FETCH_COUNTS } from "./windows";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const BINANCE_BASE = "https://api.binance.com/api/v3";
@@ -103,7 +104,7 @@ function parseKlines(rows: BinanceKline[]): CandleData[] {
 export async function fetchBinanceCandles(
   symbol: Symbol,
   timeframe: Timeframe,
-  count = CANDLE_LIMIT
+  count = FETCH_COUNTS[timeframe]
 ): Promise<CandleData[]> {
   const pair = BINANCE_SYMBOL[symbol];
   const interval = BINANCE_INTERVAL[timeframe];
@@ -151,7 +152,7 @@ export async function fetchCandleMap(symbol: Symbol): Promise<FetchResult> {
 
   try {
     const results = await Promise.all(
-      timeframes.map((tf) => fetchBinanceCandles(symbol, tf))
+      timeframes.map((tf) => fetchBinanceCandles(symbol, tf, FETCH_COUNTS[tf]))
     );
     const candleMap = {} as CandleMap;
     timeframes.forEach((tf, i) => {
@@ -164,7 +165,7 @@ export async function fetchCandleMap(symbol: Symbol): Promise<FetchResult> {
     const warning =
       err instanceof Error ? err.message : "Binance unavailable — demo mode";
     for (const tf of timeframes) {
-      candleMap[tf] = generateCandles(symbol, tf);
+      candleMap[tf] = generateCandles(symbol, tf, FETCH_COUNTS[tf]);
     }
     return { candleMap, source: "demo", warning };
   }

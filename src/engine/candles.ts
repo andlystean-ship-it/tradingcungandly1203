@@ -9,6 +9,7 @@
  */
 
 import type { CandleData, Timeframe, Symbol } from "../types";
+import { FETCH_COUNTS } from "./windows";
 
 // ── Seeded linear-congruential generator ──────────────────────────────────────
 function seededRng(seed: number): () => number {
@@ -98,6 +99,7 @@ export function generateCandles(
 
 /**
  * Build a full multi-timeframe candle map for a symbol.
+ * Uses FETCH_COUNTS from the window policy so each TF gets the depth it needs.
  */
 export function buildCandleMap(
   symbol: Symbol
@@ -114,7 +116,7 @@ export function buildCandleMap(
   ];
   const map = {} as Record<Timeframe, CandleData[]>;
   for (const tf of timeframes) {
-    map[tf] = generateCandles(symbol, tf);
+    map[tf] = generateCandles(symbol, tf, FETCH_COUNTS[tf]);
   }
   return map;
 }

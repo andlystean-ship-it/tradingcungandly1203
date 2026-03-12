@@ -30,6 +30,8 @@ import type {
   Symbol,
   Timeframe,
   Trendline,
+  TrendContext,
+  TrendAlignment,
 } from "../types";
 import { calcPivot, nearestSupport, nearestResistance } from "./pivot";
 import { detectSwingHighs, detectSwingLows } from "./swings";
@@ -43,6 +45,7 @@ export type ScenarioInput = {
   timeframeSignals: TimeframeSignal[];
   marketBias: MarketBias;
   chartTrendlines: Trendline[];
+  trendContext: TrendContext;
   symbol: Symbol;
 };
 
@@ -178,11 +181,12 @@ function identifyZone(
   return "bear2";
 }
 
-// ── Determine primary side from MTF consensus ──────────────────────────────────
+// ── Determine primary side from MTF consensus + trend context ──────────────────
 function determinePrimarySide(
   zone: Zone,
   marketBias: MarketBias,
-  htfSignals: TimeframeSignal[]
+  htfSignals: TimeframeSignal[],
+  trendContext: TrendContext
 ): "long" | "short" {
   const htfBullish = htfSignals.filter(s => s.bias === "bullish").length;
   const htfBearish = htfSignals.filter(s => s.bias === "bearish").length;
@@ -196,6 +200,12 @@ function determinePrimarySide(
   }
   if (!zoneLong && htfBullish > htfBearish && marketBias.confidence > 30) {
     return "long";
+  }
+
+  // Trend alignment can resolve transition zone ambiguity
+  if (zone === "trans") {
+    if (trendContext.alignment === "aligned_bearish" && htfBearish >= htfBullish) return "short";
+    if (trendContext.alignment === "aligned_bullish" && htfBullish >= htfBearish) return "long";
   }
 
   return zoneLong ? "long" : "short";
@@ -274,6 +284,7 @@ function buildExplanationLines(
   pendingShort: number,
   invalidationLevel: number,
   status: SignalStatus,
+  trendContext: TrendContext,
   fmt: (n: number) => string
 ): string[] {
   const biasDir = marketBias.dominantSide === "long" ? "TĂNG" : "GIẢM";
@@ -293,10 +304,43 @@ function buildExplanationLines(
   };
   lines.push(`Zone: ${zone} — ${zoneVi[zone]}. Pivot ${fmt(pivot)}`);
 
+  // ── Trend context line ─────────────────────────────────────────────────────
+  const alignVi: Record<TrendAlignment, string> = {
+    aligned_bullish: "xu hướng đồng thuận TĂNG",
+    aligned_bearish: "xu hướng đồng thuận GIẢM",
+    mixed: "xu hướng trái chiều",
+    neutral: "chưa có xu hướng rõ",
+  };
+  const trendLine = `Trend: ${alignVi[trendContext.alignment]}`;
+  const trendParts: string[] = [trendLine];
+
+  if (trendContext.shortTerm.dominantLine) {
+    const dl = trendContext.shortTerm.dominantLine;
+    trendParts.push(
+      dl.kind === "ascending"
+        ? "trendline hỗ trợ tăng đang active"
+        : "trendline kháng cự giảm đang active"
+    );
+  }
+  if (trendContext.higherTimeframe.direction !== "neutral") {
+    trendParts.push(
+      trendContext.higherTimeframe.direction === "bullish"
+        ? "HTF trend tăng hỗ trợ"
+        : "HTF trend giảm gây áp lực"
+    );
+  }
+  lines.push(trendParts.join(" — "));
+
   if (primarySide === "long") {
     lines.push(`Kịch bản chính: LONG entry ${fmt(pendingLong)} → target ${fmt(targetPrice)}`);
+    if (trendContext.higherTimeframe.direction === "bearish") {
+      lines.push("⚠ HTF trend giảm — long chỉ mang tính chiến thuật ngắn hạn");
+    }
   } else {
     lines.push(`Kịch bản chính: SHORT entry ${fmt(pendingShort)} → target ${fmt(targetPrice)}`);
+    if (trendContext.higherTimeframe.direction === "bullish") {
+      lines.push("⚠ HTF trend tăng — short chỉ mang tính chiến thuật ngắn hạn");
+    }
   }
 
   const statusVi: Record<SignalStatus, string> = {
@@ -318,7 +362,7 @@ function buildExplanationLines(
 
 // ── Main scenario builder ─────────────────────────────────────────────────────
 export function buildScenario(input: ScenarioInput): MarketScenario {
-  const { candleMap, timeframeSignals, marketBias, chartTrendlines, symbol } = input;
+  const { candleMap, timeframeSignals, marketBias, chartTrendlines, trendContext, symbol } = input;
 
   const chartCandles = candleMap["1H"];
   const levels1H = calcPivot(chartCandles);
@@ -341,7 +385,7 @@ export function buildScenario(input: ScenarioInput): MarketScenario {
   const zone = identifyZone(currentPrice, pivot, r1, s1, s2);
 
   // ── Primary side from MTF consensus (not just zone) ──────────────────────────
-  const primarySide = determinePrimarySide(zone, marketBias, htfSignals);
+  const primarySide = determinePrimarySide(zone, marketBias, htfSignals, trendContext);
 
   // ── Role-based level selection ───────────────────────────────────────────────
   const minGap = currentPrice * 0.003;
@@ -427,7 +471,7 @@ export function buildScenario(input: ScenarioInput): MarketScenario {
   const explanationLines = buildExplanationLines(
     zone, primarySide, marketBias, htfSignals,
     pivot, targetPrice, pendingLong, pendingShort, invalidationLevel,
-    status, fmt
+    status, trendContext, fmt
   );
 
   // ── Primary + alternate scenarios ──────────────────────────────────────────
@@ -459,6 +503,19 @@ export function buildScenario(input: ScenarioInput): MarketScenario {
   if (scenarioState === "conflicted") {
     cautionText = (cautionText ? cautionText + ". " : "") +
       "⚠ LTF và HTF đang xung đột — giảm size hoặc chờ confluence";
+  }
+  // Trend alignment caution
+  if (trendContext.alignment === "mixed") {
+    cautionText = (cautionText ? cautionText + ". " : "") +
+      "⚠ Xu hướng trái chiều giữa các khung — confidence giảm";
+  }
+  if (primarySide === "long" && trendContext.higherTimeframe.direction === "bearish") {
+    cautionText = (cautionText ? cautionText + ". " : "") +
+      "HTF trend giảm — kịch bản long chỉ mang tính chiến thuật";
+  }
+  if (primarySide === "short" && trendContext.higherTimeframe.direction === "bullish") {
+    cautionText = (cautionText ? cautionText + ". " : "") +
+      "HTF trend tăng — kịch bản short chỉ mang tính chiến thuật";
   }
 
   return {

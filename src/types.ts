@@ -54,6 +54,35 @@ export type Trendline = {
   strength: number; // 0–100
   active: boolean;
   broken: boolean;
+  // ── Extended fields (from trend refactor) ──────────────────────────────────
+  slope?: number;
+  span?: number;
+  touchCount?: number;
+  violationCount?: number;
+  role?: "dynamic_support" | "dynamic_resistance";
+  sourceTimeframe?: string;
+};
+
+// ── Multi-timeframe trend context ────────────────────────────────────────────
+export type TrendDirection = "bullish" | "bearish" | "neutral";
+export type TrendAlignment =
+  | "aligned_bullish"
+  | "aligned_bearish"
+  | "mixed"
+  | "neutral";
+
+export type TrendLayer = {
+  direction: TrendDirection;
+  activeTrendlines: Trendline[];
+  dominantLine: Trendline | null;
+  strength: number; // 0–100
+};
+
+export type TrendContext = {
+  shortTerm: TrendLayer;
+  mediumTerm: TrendLayer;
+  higherTimeframe: TrendLayer;
+  alignment: TrendAlignment;
 };
 
 // ── Per-timeframe signal ──────────────────────────────────────────────────────
@@ -129,6 +158,7 @@ export type EngineOutput = {
   marketBias: MarketBias;
   timeframeSignals: TimeframeSignal[];
   trendlines: Trendline[];
+  trendContext: TrendContext;
   marketScenario: MarketScenario;
   dataStatus: DataStatus;
 };
