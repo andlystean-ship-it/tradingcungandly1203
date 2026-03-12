@@ -37,7 +37,7 @@ import type {
   TimeframeEntry,
 } from "../types";
 import { calcPivot, nearestSupport, nearestResistance } from "./pivot";
-import { detectSwingHighs, detectSwingLows } from "./swings";
+import { detectSwingHighs, detectSwingLows, type SwingPoint } from "./swings";
 import { buildTrendlines } from "./trendlines";
 import { ENTRY_QUALITY } from "./score-config";
 import i18n from "../i18n";
@@ -665,10 +665,19 @@ export function getEntryForTimeframe(
     if (!tl.active || tl.x2 === tl.x1) continue;
     const slope = (tl.y2 - tl.y1) / (tl.x2 - tl.x1);
     const projected = tl.y1 + slope * (lastIdx - tl.x1);
+    const projectedPoint: SwingPoint = {
+      index: lastIdx,
+      price: projected,
+      time: candles[lastIdx]?.time ?? 0,
+      confirmed: true,
+      strength: tl.strength,
+      significance: tl.strength,
+      localRangeContext: 0,
+    };
     if (projected < currentPrice) {
-      supports.push({ index: lastIdx, price: projected, significance: tl.strength } as any);
+      supports.push(projectedPoint);
     } else {
-      resistances.push({ index: lastIdx, price: projected, significance: tl.strength } as any);
+      resistances.push(projectedPoint);
     }
   }
 

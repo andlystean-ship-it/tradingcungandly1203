@@ -1,14 +1,17 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { MarketScenario, Trendline } from "../types";
+import type { DataStatus, MarketBias, MarketScenario, TrendContext, TrendLayer, Trendline } from "../types";
 
 type TabId = "signals" | "analysis" | "trendlines";
 
 type Props = {
   scenario: MarketScenario;
+  trendContext: TrendContext;
+  marketBias: MarketBias;
+  dataStatus: DataStatus;
 };
 
-export default function ChartTabs({ scenario }: Props) {
+export default function ChartTabs({ scenario, trendContext, marketBias, dataStatus }: Props) {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<TabId>("signals");
   const activeTrendlines = scenario.trendlines.filter((trendline) => trendline.active);
@@ -45,7 +48,14 @@ export default function ChartTabs({ scenario }: Props) {
 
       <div className="tab-content" role="tabpanel">
         {activeTab === "signals" && <SignalsTab scenario={scenario} />}
-        {activeTab === "analysis" && <AnalysisTab scenario={scenario} />}
+        {activeTab === "analysis" && (
+          <AnalysisTab
+            scenario={scenario}
+            trendContext={trendContext}
+            marketBias={marketBias}
+            dataStatus={dataStatus}
+          />
+        )}
         {activeTab === "trendlines" && <TrendlinesTab trendlines={activeTrendlines} />}
       </div>
     </>
@@ -103,7 +113,17 @@ function SignalsTab({ scenario }: { scenario: MarketScenario }) {
   );
 }
 
-function AnalysisTab({ scenario }: { scenario: MarketScenario }) {
+function AnalysisTab({
+  scenario,
+  trendContext,
+  marketBias,
+  dataStatus,
+}: {
+  scenario: MarketScenario;
+  trendContext: TrendContext;
+  marketBias: MarketBias;
+  dataStatus: DataStatus;
+}) {
   const { t } = useTranslation();
   const isAbovePivot = scenario.currentPrice >= scenario.pivot;
   const items = [
@@ -142,13 +162,97 @@ function AnalysisTab({ scenario }: { scenario: MarketScenario }) {
   ];
 
   return (
-    <div className="analysis-list">
-      {items.map((item, index) => (
-        <div key={index} className="analysis-item">
-          <div className={`analysis-dot ${item.dot}`} />
-          <div className="analysis-text">{item.text}</div>
-        </div>
-      ))}
+    <div>
+      <div className="analysis-list">
+        {items.map((item, index) => (
+          <div key={index} className="analysis-item">
+            <div className={`analysis-dot ${item.dot}`} />
+            <div className="analysis-text">{item.text}</div>
+          </div>
+        ))}
+      </div>
+
+      <EngineDebugPanel
+        trendContext={trendContext}
+        marketBias={marketBias}
+        dataStatus={dataStatus}
+      />
+    </div>
+  );
+}
+
+function EngineDebugPanel({
+  trendContext,
+  marketBias,
+  dataStatus,
+}: {
+  trendContext: TrendContext;
+  marketBias: MarketBias;
+  dataStatus: DataStatus;
+}) {
+  const htfAgreement = marketBias.htfAgreement ?? 50;
+  const conflictFlags = marketBias.conflictFlags?.length
+    ? marketBias.conflictFlags.join(" | ")
+    : "none";
+  const missingTf = dataStatus.missingTimeframes?.length
+    ? dataStatus.missingTimeframes.join(", ")
+    : "none";
+
+  return (
+    <div className="engine-debug-panel">
+      <div className="engine-debug-header">
+        <div className="engine-debug-title">Engine Debug</div>
+        <div className="engine-debug-badge">{dataStatus.sourceMode.toUpperCase()}</div>
+      </div>
+
+      <div className="engine-debug-grid">
+        <DebugMetric label="Alignment" value={trendContext.alignment} />
+        <DebugMetric label="HTF agreement" value={`${htfAgreement}%`} />
+        <DebugMetric label="Pressure" value={`${trendContext.pressure?.dominantPressureDirection ?? "neutral"} | ${trendContext.pressure?.pressureStrength ?? 0}`} />
+        <DebugMetric label="Completeness" value={`${dataStatus.timeframeCompleteness ?? 100}%`} />
+      </div>
+
+      <div className="engine-debug-note">Conflict flags: {conflictFlags}</div>
+      <div className="engine-debug-note">Missing TF: {missingTf}</div>
+      <div className="engine-debug-note">Pressure reason: {trendContext.pressure?.pressureReason ?? "n/a"}</div>
+
+      <div className="engine-debug-layers">
+        <LayerCard title="Short 1H" layer={trendContext.shortTerm} />
+        <LayerCard title="Medium 4H" layer={trendContext.mediumTerm} />
+        <LayerCard title="HTF 12H/1D/1W" layer={trendContext.higherTimeframe} />
+      </div>
+    </div>
+  );
+}
+
+function DebugMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="engine-debug-metric">
+      <div className="engine-debug-label">{label}</div>
+      <div className="engine-debug-value">{value}</div>
+    </div>
+  );
+}
+
+function LayerCard({ title, layer }: { title: string; layer: TrendLayer }) {
+  const rationale = layer.rationale?.length ? layer.rationale.join(" | ") : "n/a";
+
+  return (
+    <div className="engine-layer-card">
+      <div className="engine-layer-title">{title}</div>
+      <div className="engine-layer-row">
+        <span>dir: {layer.direction}</span>
+        <span>strength: {layer.strength}</span>
+      </div>
+      <div className="engine-layer-row">
+        <span>structure: {layer.structureState ?? "n/a"}</span>
+        <span>ema: {layer.emaState ?? "n/a"}</span>
+      </div>
+      <div className="engine-layer-row">
+        <span>trendline: {layer.trendlineState ?? "n/a"}</span>
+        <span>pressure: {layer.pressureState ?? "n/a"}</span>
+      </div>
+      <div className="engine-layer-note">{rationale}</div>
     </div>
   );
 }

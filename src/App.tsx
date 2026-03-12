@@ -107,7 +107,12 @@ export default function App() {
         scenario={engine.marketScenario}
         theme={settings.theme}
       />
-      <ChartTabs scenario={engine.marketScenario} />
+      <ChartTabs
+        scenario={engine.marketScenario}
+        trendContext={engine.trendContext}
+        marketBias={engine.marketBias}
+        dataStatus={engine.dataStatus}
+      />
       <SignalHistoryPanel symbol={symbol} />
       <NewsPanel news={news} symbol={symbol} />
       <SettingsPanel

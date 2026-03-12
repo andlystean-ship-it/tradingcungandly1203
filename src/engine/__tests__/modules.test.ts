@@ -159,7 +159,7 @@ describe("KNOWN_SYMBOLS", () => {
 // ── Engine config threading ───────────────────────────────────────────────────
 import { buildTrendlines } from "../trendlines";
 import { DEFAULT_SWING_CONFIG, detectSwingHighs } from "../swings";
-import type { CandleData } from "../../types";
+import type { CandleData, Symbol } from "../../types";
 
 describe("Engine config threading", () => {
   function makeCandles(count: number, basePrice = 100): CandleData[] {
@@ -212,13 +212,13 @@ import { generateCandles } from "../candles";
 
 describe("generateCandles fallback", () => {
   it("generates candles for a known symbol", () => {
-    const candles = generateCandles("BTC/USDT" as any, "1H", 20);
+    const candles = generateCandles("BTC/USDT" as Symbol, "1H", 20);
     expect(candles).toHaveLength(20);
     expect(candles[0].open).toBeGreaterThan(0);
   });
 
   it("generates candles for an unknown dynamic symbol without crashing", () => {
-    const candles = generateCandles("PEPE/USDT" as any, "1H", 20);
+    const candles = generateCandles("PEPE/USDT" as unknown as Symbol, "1H", 20);
     expect(candles).toHaveLength(20);
     expect(candles[0].open).toBeGreaterThan(0);
   });

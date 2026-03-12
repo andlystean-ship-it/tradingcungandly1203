@@ -156,6 +156,20 @@ describe("scoreTimeframe", () => {
     expect(withHTF.bullishScore).toBeGreaterThanOrEqual(withoutHTF.bullishScore - 5);
   });
 
+  it("uses 1W as HTF parent for 1D scoring", () => {
+    const candles = makeCandles(100);
+    const withoutHTF = scoreTimeframe("1D", candles);
+
+    const bullishWeekly: HTFContext = { htfScores: { "1W": 88 } };
+    const bearishWeekly: HTFContext = { htfScores: { "1W": 12 } };
+
+    const withBullishWeekly = scoreTimeframe("1D", candles, bullishWeekly);
+    const withBearishWeekly = scoreTimeframe("1D", candles, bearishWeekly);
+
+    expect(withBullishWeekly.bullishScore).toBeGreaterThanOrEqual(withoutHTF.bullishScore);
+    expect(withBearishWeekly.bullishScore).toBeLessThanOrEqual(withoutHTF.bullishScore);
+  });
+
   it("produces swing-based bullish/bearish levels", () => {
     const candles = makeCandles(50000);
     const signal = scoreTimeframe("4H", candles);

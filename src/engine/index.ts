@@ -46,7 +46,7 @@ export function getChartCandles(symbol: Symbol, count = 80): CandleData[] {
 }
 
 // ── HTF / LTF split ────────────────────────────────────────────────────────────
-const HTF_SET = new Set<Timeframe>(["4H", "6H", "8H", "12H", "1D"]);
+const HTF_SET = new Set<Timeframe>(["4H", "6H", "8H", "12H", "1D", "1W"]);
 
 // ── Shared engine pipeline (symbol-agnostic) ──────────────────────────────────
 function runPipeline(
@@ -90,7 +90,11 @@ function runPipeline(
   const trendlines = buildTrendlines(structureCandles, "1H", swingOverrides);
 
   // Build multi-timeframe trend context
-  const trendContext = buildTrendContext(candleMap, trendlines);
+  // Keep 1H candle indices aligned with the 1H trendlines we built from the structure window.
+  const trendContext = buildTrendContext({
+    ...candleMap,
+    "1H": structureCandles,
+  }, trendlines);
 
   // ── Two-pass scoring: HTF first, then LTF with htfContext ─────────────────
   const timeframes = Object.keys(TF_WEIGHTS) as Timeframe[];
