@@ -3,7 +3,7 @@
  * Dynamic news fetcher with keyword-based sentiment scoring.
  *
  * Primary source: CryptoPanic API (free tier, no key required for public feed)
- * Fallback: static news from news.ts
+ * Shared helper module for sentiment scoring and lightweight live fetch.
  *
  * Sentiment is scored deterministically from keyword analysis:
  *   - Positive keywords: bullish, surge, rally, pump, breakout, accumulation, support, inflows
@@ -12,7 +12,6 @@
  */
 
 import type { NewsItem, Symbol, Bias } from "../types";
-import { getNews as getStaticNews } from "./news";
 
 const CRYPTOPANIC_BASE = "https://cryptopanic.com/api/free/v1/posts/";
 
@@ -87,7 +86,6 @@ type CryptoPanicPost = {
 
 /**
  * Fetch live news for a symbol.
- * Falls back to static news if API is unavailable.
  */
 export async function fetchNews(symbol: Symbol): Promise<NewsItem[]> {
   try {
@@ -104,13 +102,13 @@ export async function fetchNews(symbol: Symbol): Promise<NewsItem[]> {
     clearTimeout(timeout);
 
     if (!response.ok) {
-      return getStaticNews(symbol);
+      return [];
     }
 
     const data = await response.json() as { results?: CryptoPanicPost[] };
 
     if (!data.results || data.results.length === 0) {
-      return getStaticNews(symbol);
+      return [];
     }
 
     const items: NewsItem[] = data.results.slice(0, 8).map((post, i) => {
@@ -131,10 +129,9 @@ export async function fetchNews(symbol: Symbol): Promise<NewsItem[]> {
       };
     });
 
-    return items.length > 0 ? items : getStaticNews(symbol);
+    return items;
   } catch {
-    // Network error, CORS block, timeout — fall back to static
-    return getStaticNews(symbol);
+    return [];
   }
 }
 

@@ -20,6 +20,9 @@ export type PivotLevels = {
 };
 
 export function calcPivot(candles: CandleData[]): PivotLevels {
+  if (candles.length === 0) {
+    return { pivot: 0, r1: 0, r2: 0, r3: 0, s1: 0, s2: 0, s3: 0 };
+  }
   if (candles.length < 2) {
     const c = candles[0];
     const p = (c.high + c.low + c.close) / 3;

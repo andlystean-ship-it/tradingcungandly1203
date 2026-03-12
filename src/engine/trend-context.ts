@@ -54,43 +54,39 @@ function buildLayer(trendlines: Trendline[]): TrendLayer {
     return { direction: "neutral", activeTrendlines: [], dominantLine: null, strength: 0 };
   }
 
-  // Slope × span × strength weighted directional scoring
-  let ascScore = 0;
-  let descScore = 0;
+  let netScore = 0;
+  let totalAbsScore = 0;
+  let dominantLine: Trendline | null = null;
+  let dominantAbsScore = -1;
+
   for (const t of active) {
-    const s = t.strength;
-    // Weight by touch count (more touches = more reliable)
+    const baseStrength = Math.max(0, t.strength);
     const touchBonus = Math.min(20, (t.touchCount ?? 1) * 5);
-    // Penalize lines with violations
     const violationPenalty = Math.min(30, (t.violationCount ?? 0) * 10);
+    const effectiveStrength = Math.max(0, baseStrength + touchBonus - violationPenalty);
+    const slope = t.slope ?? (t.x2 === t.x1 ? 0 : (t.y2 - t.y1) / (t.x2 - t.x1));
+    const length = Math.max(1, t.length ?? t.span ?? Math.abs(t.x2 - t.x1));
 
-    // Slope magnitude: steeper = stronger directional signal
-    const slopeMag = Math.abs(t.slope ?? 0);
-    const slopeFactor = Math.min(2.0, 0.5 + slopeMag * 500); // clamp at 2x
+    // Signed score: positive slope => bullish pressure, negative => bearish pressure.
+    const signedScore = slope * length * effectiveStrength * 100;
+    netScore += signedScore;
+    totalAbsScore += Math.abs(signedScore);
 
-    // Span: longer lines are more reliable
-    const spanFactor = Math.min(2.0, 0.5 + (t.span ?? 10) / 30);
-
-    const effectiveStrength = Math.max(0, (s + touchBonus - violationPenalty) * slopeFactor * spanFactor);
-
-    if (t.kind === "ascending") ascScore += effectiveStrength;
-    else descScore += effectiveStrength;
+    if (Math.abs(signedScore) > dominantAbsScore) {
+      dominantAbsScore = Math.abs(signedScore);
+      dominantLine = t;
+    }
   }
 
-  const totalScore = ascScore + descScore || 1;
-  const ascRatio = ascScore / totalScore;
-  const descRatio = descScore / totalScore;
+  const balance = totalAbsScore > 0 ? netScore / totalAbsScore : 0;
 
   let direction: TrendDirection = "neutral";
-  // Require >60% dominance to declare directional (not just majority)
-  if (ascRatio > 0.6) direction = "bullish";
-  else if (descRatio > 0.6) direction = "bearish";
-  else if (ascScore > 0 && descScore > 0) direction = "neutral"; // contested
+  if (balance > 0.12) direction = "bullish";
+  else if (balance < -0.12) direction = "bearish";
 
-  const dominant = active.reduce((best, t) => (t.strength > best.strength ? t : best));
-  const strength = Math.round(Math.max(ascScore, descScore) / active.length);
+  const strength = Math.max(0, Math.min(100, Math.round(Math.abs(balance) * 100)));
 
-  return { direction, activeTrendlines: active, dominantLine: dominant, strength };
+  return { direction, activeTrendlines: active, dominantLine, strength };
 }
 
 function computeAlignment(

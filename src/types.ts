@@ -62,6 +62,7 @@ export type Trendline = {
   // ── Extended fields (from trend refactor) ──────────────────────────────────
   slope?: number;
   span?: number;
+  length?: number;
   touchCount?: number;
   violationCount?: number;
   role?: "dynamic_support" | "dynamic_resistance";
@@ -183,6 +184,10 @@ export type TimeframeEntry = {
   shortEntry: number;
   target: number;
   invalidation: number;
+  pendingLong: number;
+  pendingShort: number;
+  targetPrice: number;
+  invalidationLevel: number;
   longReason: string;
   shortReason: string;
 };

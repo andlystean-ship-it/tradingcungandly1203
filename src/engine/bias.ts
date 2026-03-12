@@ -118,7 +118,20 @@ export function computeBias(
     }
   }
 
-  // Penalty 5: LTF vs HTF on opposite sides of 50 + weak convergence
+  // Adjustment 5: EMA confirmation from trend context
+  if (context?.trendContext?.emaCrossover) {
+    const emaDirection = context.trendContext.emaCrossover.direction;
+    if ((bullishPercent > 55 && emaDirection === "bullish") ||
+        (bullishPercent < 45 && emaDirection === "bearish")) {
+      confidence = Math.min(100, confidence + 6);
+    } else if ((bullishPercent > 55 && emaDirection === "bearish") ||
+               (bullishPercent < 45 && emaDirection === "bullish")) {
+      trendPressurePenalty += 6;
+      confidence = Math.max(0, confidence - 6);
+    }
+  }
+
+  // Penalty 6: LTF vs HTF on opposite sides of 50 + weak convergence
   if ((ltfBullishAvg > 55 && htfBullishAvg < 45) || (ltfBullishAvg < 45 && htfBullishAvg > 55)) {
     confidence = Math.max(0, confidence - 12);
   }

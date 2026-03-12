@@ -11,7 +11,7 @@
  */
 
 import type { NewsItem, Symbol } from "../types";
-import { fetchNews as fetchLiveNews } from "./news-api";
+import { scoreSentiment } from "./news-api";
 
 const XAU_NEWS: NewsItem[] = [
   {
@@ -158,6 +158,171 @@ export function getNews(symbol: Symbol): NewsItem[] {
   return GENERIC_NEWS;
 }
 
+type CryptoPanicPost = {
+  id: number;
+  title: string;
+  source?: { title?: string };
+  published_at: string;
+  currencies?: { code: string }[];
+};
+
+type NewsApiArticle = {
+  source?: { name?: string };
+  title?: string;
+  description?: string;
+  publishedAt?: string;
+};
+
+const HANOI_TIME_ZONE = "Asia/Bangkok";
+const CRYPTOPANIC_BASE = "https://cryptopanic.com/api/free/v1/posts/";
+const NEWSAPI_BASE = "https://newsapi.org/v2/everything";
+
+function symbolToCryptoPanicCurrency(symbol: Symbol): string {
+  const map: Record<Symbol, string> = {
+    "XAU/USDT": "PAXG",
+    "BTC/USDT": "BTC",
+    "ETH/USDT": "ETH",
+    "SOL/USDT": "SOL",
+    "BNB/USDT": "BNB",
+    "XRP/USDT": "XRP",
+    "ADA/USDT": "ADA",
+    "DOGE/USDT": "DOGE",
+    "DOT/USDT": "DOT",
+    "AVAX/USDT": "AVAX",
+    "LINK/USDT": "LINK",
+    "SUI/USDT": "SUI",
+  };
+  return map[symbol] ?? "BTC";
+}
+
+function symbolToNewsQuery(symbol: Symbol): string {
+  const map: Record<Symbol, string> = {
+    "XAU/USDT": "gold OR XAU OR PAXG",
+    "BTC/USDT": "bitcoin OR BTC",
+    "ETH/USDT": "ethereum OR ETH",
+    "SOL/USDT": "solana OR SOL",
+    "BNB/USDT": "BNB OR binance coin",
+    "XRP/USDT": "XRP OR ripple",
+    "ADA/USDT": "cardano OR ADA",
+    "DOGE/USDT": "dogecoin OR DOGE",
+    "DOT/USDT": "polkadot OR DOT",
+    "AVAX/USDT": "avalanche OR AVAX",
+    "LINK/USDT": "chainlink OR LINK",
+    "SUI/USDT": "SUI crypto",
+  };
+  return map[symbol] ?? "bitcoin OR crypto market";
+}
+
+function formatPublishedAtHanoi(value?: string): string {
+  if (!value) return "Gần đây";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Gần đây";
+
+  return `${new Intl.DateTimeFormat("vi-VN", {
+    timeZone: HANOI_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date)} GMT+7`;
+}
+
+function mapToNewsItem(
+  id: string,
+  source: string,
+  title: string,
+  summary: string,
+  publishedAt: string | undefined,
+  relatedCoins: string[],
+): NewsItem {
+  const sentiment = scoreSentiment(`${title} ${summary}`);
+  return {
+    id,
+    source,
+    publishedAt: formatPublishedAtHanoi(publishedAt),
+    title,
+    summary,
+    relatedCoins,
+    sentimentLabel: sentiment.label,
+    sentimentScore: sentiment.score,
+    hasTargetPrice: /\$\d+|\btarget\b|mốc|kháng cự|support|resistance/i.test(`${title} ${summary}`),
+  };
+}
+
+async function fetchFromCryptoPanic(symbol: Symbol): Promise<NewsItem[]> {
+  const params = new URLSearchParams({
+    currencies: symbolToCryptoPanicCurrency(symbol),
+    kind: "news",
+    public: "true",
+  });
+  const apiKey = import.meta.env.VITE_CRYPTOPANIC_API_KEY;
+  if (apiKey) params.set("auth_token", apiKey);
+
+  const response = await fetch(`${CRYPTOPANIC_BASE}?${params.toString()}`, {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    throw new Error(`CryptoPanic request failed: ${response.status}`);
+  }
+
+  const data = await response.json() as { results?: CryptoPanicPost[] };
+  const posts = data.results ?? [];
+  return posts.slice(0, 8).map((post, index) => mapToNewsItem(
+    `cp-${post.id ?? index}`,
+    post.source?.title || "CryptoPanic",
+    post.title,
+    post.title,
+    post.published_at,
+    post.currencies?.map(currency => currency.code) ?? [symbolToCryptoPanicCurrency(symbol)],
+  ));
+}
+
+async function fetchFromNewsApi(symbol: Symbol): Promise<NewsItem[]> {
+  const apiKey = import.meta.env.VITE_NEWSAPI_KEY;
+  if (!apiKey) return [];
+
+  const params = new URLSearchParams({
+    q: symbolToNewsQuery(symbol),
+    language: "en",
+    sortBy: "publishedAt",
+    pageSize: "8",
+    apiKey,
+  });
+
+  const response = await fetch(`${NEWSAPI_BASE}?${params.toString()}`, {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    throw new Error(`NewsAPI request failed: ${response.status}`);
+  }
+
+  const data = await response.json() as { articles?: NewsApiArticle[] };
+  const articles = data.articles ?? [];
+  return articles
+    .filter(article => article.title)
+    .slice(0, 8)
+    .map((article, index) => mapToNewsItem(
+      `newsapi-${index}`,
+      article.source?.name || "NewsAPI",
+      article.title || "Untitled",
+      article.description || article.title || "",
+      article.publishedAt,
+      [symbolToCryptoPanicCurrency(symbol)],
+    ));
+}
+
+export async function fetchNewsFromApi(symbol: Symbol): Promise<NewsItem[]> {
+  const cryptoPanicItems = await fetchFromCryptoPanic(symbol).catch(() => []);
+  if (cryptoPanicItems.length > 0) return cryptoPanicItems;
+
+  const newsApiItems = await fetchFromNewsApi(symbol).catch(() => []);
+  if (newsApiItems.length > 0) return newsApiItems;
+
+  throw new Error(`No live news available for ${symbol}`);
+}
+
 /**
  * Async news fetcher — tries CryptoPanic API first, falls back to static.
  * Results are cached for 5 minutes per symbol to avoid quota exhaustion.
@@ -172,10 +337,14 @@ export async function getNewsAsync(symbol: Symbol): Promise<NewsItem[]> {
   }
 
   try {
-    const items = await fetchLiveNews(symbol);
+    const items = await fetchNewsFromApi(symbol);
     newsCache.set(symbol, { items, ts: Date.now() });
     return items;
   } catch {
     return getNews(symbol);
   }
+}
+
+export function resetNewsCacheForTests(): void {
+  newsCache.clear();
 }

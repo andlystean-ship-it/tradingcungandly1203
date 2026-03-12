@@ -596,7 +596,31 @@ function assessEntryQuality(
 
 // ── Per-timeframe entry computation ───────────────────────────────────────────
 
-const ENTRY_TFS: Timeframe[] = ["15M", "1H", "4H"];
+const ENTRY_TFS: Timeframe[] = ["15M", "1H", "4H", "12H", "1D"];
+
+function resolveEntryBias(
+  marketBias: MarketBias,
+  trendContext: TrendContext,
+): "long" | "short" {
+  if (marketBias.dominantSide === "long" || marketBias.dominantSide === "short") {
+    return marketBias.dominantSide;
+  }
+
+  if (trendContext.emaCrossover?.direction === "bullish") return "long";
+  if (trendContext.emaCrossover?.direction === "bearish") return "short";
+
+  if (trendContext.alignment === "aligned_bullish") return "long";
+  if (trendContext.alignment === "aligned_bearish") return "short";
+
+  const layers = [
+    trendContext.shortTerm.direction,
+    trendContext.mediumTerm.direction,
+    trendContext.higherTimeframe.direction,
+  ];
+  const bullishVotes = layers.filter(direction => direction === "bullish").length;
+  const bearishVotes = layers.filter(direction => direction === "bearish").length;
+  return bullishVotes >= bearishVotes ? "long" : "short";
+}
 
 /**
  * Compute entry levels (long/short) for a single timeframe using that
@@ -608,10 +632,13 @@ const ENTRY_TFS: Timeframe[] = ["15M", "1H", "4H"];
 export function getEntryForTimeframe(
   tf: Timeframe,
   candleMap: CandleMap,
-  primarySide: "long" | "short",
+  marketBias: MarketBias,
+  trendContext: TrendContext,
 ): TimeframeEntry | null {
   const candles = candleMap[tf];
   if (!candles || candles.length < 10) return null;
+
+  const preferredSide = resolveEntryBias(marketBias, trendContext);
 
   const currentPrice = candles[candles.length - 1].close;
   const levels = calcPivot(candles);
@@ -654,7 +681,7 @@ export function getEntryForTimeframe(
   let longReason: string;
   let shortReason: string;
 
-  if (primarySide === "long") {
+  if (preferredSide === "long") {
     longEntry = supports.length > 0 ? supports[0].price : nearestSupport(levels, currentPrice);
     longReason = supports.length > 0 ? `swing-${tf}` : `pivot-${tf}`;
 
@@ -690,6 +717,10 @@ export function getEntryForTimeframe(
     shortEntry: fix(shortEntry),
     target: fix(target),
     invalidation: fix(invalidation),
+    pendingLong: fix(longEntry),
+    pendingShort: fix(shortEntry),
+    targetPrice: fix(target),
+    invalidationLevel: fix(invalidation),
     longReason,
     shortReason,
   };
@@ -946,18 +977,19 @@ export function buildScenario(input: ScenarioInput): MarketScenario {
     alternateQuality: alternateEntryQuality,
     primaryScenarioIsActionable,
     primaryRejectReason,
-    entriesByTF: computeEntriesByTF(candleMap, leanDirection),
+    entriesByTF: computeEntriesByTF(candleMap, marketBias, trendContext),
   };
 }
 
-/** Compute per-timeframe entries for key timeframes (15M, 1H, 4H). */
+/** Compute per-timeframe entries for key dashboard timeframes. */
 function computeEntriesByTF(
   candleMap: CandleMap,
-  primarySide: "long" | "short",
+  marketBias: MarketBias,
+  trendContext: TrendContext,
 ): TimeframeEntry[] {
   const entries: TimeframeEntry[] = [];
   for (const tf of ENTRY_TFS) {
-    const entry = getEntryForTimeframe(tf, candleMap, primarySide);
+    const entry = getEntryForTimeframe(tf, candleMap, marketBias, trendContext);
     if (entry) entries.push(entry);
   }
   return entries;

@@ -204,6 +204,9 @@ describe("generateCandles fallback", () => {
 
 // ── EMA calculation ───────────────────────────────────────────────────────────
 import { calcEMA, lastEMA } from "../candles";
+import { fetchNewsFromApi, getNewsAsync, resetNewsCacheForTests } from "../news";
+import { calcPivot } from "../pivot";
+import { scoreTimeframe } from "../scoring";
 
 describe("calcEMA", () => {
   function makeFlatCandles(price: number, count: number): CandleData[] {
@@ -242,11 +245,88 @@ describe("calcEMA", () => {
   });
 });
 
+describe("calcPivot", () => {
+  it("returns zeroed pivot levels for empty candles", () => {
+    expect(calcPivot([])).toEqual({
+      pivot: 0,
+      r1: 0,
+      r2: 0,
+      r3: 0,
+      s1: 0,
+      s2: 0,
+      s3: 0,
+    });
+  });
+});
+
+describe("scoreTimeframe", () => {
+  function makeDirectionalCandles(direction: "up" | "down", count: number, basePrice: number): CandleData[] {
+    const candles: CandleData[] = [];
+    let price = basePrice;
+    for (let i = 0; i < count; i++) {
+      const drift = direction === "up" ? 0.9 : -0.9;
+      const wave = Math.sin(i * 0.35) * basePrice * 0.004;
+      const open = price;
+      const close = price + drift + wave;
+      const high = Math.max(open, close) + basePrice * 0.01;
+      const low = Math.min(open, close) - basePrice * 0.008;
+      candles.push({
+        time: 1700000000 + i * 3600,
+        open,
+        high,
+        low,
+        close,
+      });
+      price = close;
+    }
+    return candles;
+  }
+
+  it("scores a sustained uptrend as bullish", () => {
+    const signal = scoreTimeframe("4H", makeDirectionalCandles("up", 220, 100));
+    expect(signal.bullishScore).toBeGreaterThan(55);
+    expect(signal.bias).toBe("bullish");
+  });
+
+  it("scores a sustained downtrend as bearish", () => {
+    const signal = scoreTimeframe("4H", makeDirectionalCandles("down", 220, 100));
+    expect(signal.bullishScore).toBeLessThan(45);
+    expect(signal.bias).toBe("bearish");
+  });
+});
+
 // ── Per-timeframe entries ─────────────────────────────────────────────────────
 import { getEntryForTimeframe } from "../scenario";
-import type { CandleMap, Timeframe } from "../../types";
+import type { CandleMap, MarketBias, TrendContext } from "../../types";
 
 describe("getEntryForTimeframe", () => {
+  const bullishBias: MarketBias = {
+    bullishPercent: 62,
+    bearishPercent: 38,
+    dominantSide: "long",
+    confidence: 62,
+  };
+  const bearishBias: MarketBias = {
+    bullishPercent: 35,
+    bearishPercent: 65,
+    dominantSide: "short",
+    confidence: 65,
+  };
+  const bullishTrendContext: TrendContext = {
+    shortTerm: { direction: "bullish", activeTrendlines: [], dominantLine: null, strength: 60 },
+    mediumTerm: { direction: "bullish", activeTrendlines: [], dominantLine: null, strength: 65 },
+    higherTimeframe: { direction: "bullish", activeTrendlines: [], dominantLine: null, strength: 70 },
+    alignment: "aligned_bullish",
+    emaCrossover: { direction: "bullish", ema50: 101, ema200: 99 },
+  };
+  const bearishTrendContext: TrendContext = {
+    shortTerm: { direction: "bearish", activeTrendlines: [], dominantLine: null, strength: 60 },
+    mediumTerm: { direction: "bearish", activeTrendlines: [], dominantLine: null, strength: 65 },
+    higherTimeframe: { direction: "bearish", activeTrendlines: [], dominantLine: null, strength: 70 },
+    alignment: "aligned_bearish",
+    emaCrossover: { direction: "bearish", ema50: 99, ema200: 101 },
+  };
+
   function makeTfCandles(count: number, basePrice: number): CandleData[] {
     const candles: CandleData[] = [];
     for (let i = 0; i < count; i++) {
@@ -265,23 +345,25 @@ describe("getEntryForTimeframe", () => {
 
   it("returns null for missing timeframe", () => {
     const candleMap: CandleMap = {};
-    expect(getEntryForTimeframe("15M", candleMap, "long")).toBeNull();
+    expect(getEntryForTimeframe("15M", candleMap, bullishBias, bullishTrendContext)).toBeNull();
   });
 
   it("returns null for insufficient candles", () => {
     const candleMap: CandleMap = { "1H": makeTfCandles(5, 100) };
-    expect(getEntryForTimeframe("1H", candleMap, "long")).toBeNull();
+    expect(getEntryForTimeframe("1H", candleMap, bullishBias, bullishTrendContext)).toBeNull();
   });
 
   it("returns valid entry for sufficient candles (long side)", () => {
     const candleMap: CandleMap = { "1H": makeTfCandles(50, 100) };
-    const entry = getEntryForTimeframe("1H", candleMap, "long");
+    const entry = getEntryForTimeframe("1H", candleMap, bullishBias, bullishTrendContext);
     expect(entry).not.toBeNull();
     expect(entry!.tf).toBe("1H");
     expect(entry!.longEntry).toBeGreaterThan(0);
     expect(entry!.shortEntry).toBeGreaterThan(0);
     expect(entry!.target).toBeGreaterThan(0);
     expect(entry!.invalidation).toBeGreaterThan(0);
+    expect(entry!.pendingLong).toBe(entry!.longEntry);
+    expect(entry!.targetPrice).toBe(entry!.target);
     // Long entry should be below current price (support)
     const lastPrice = candleMap["1H"]![49].close;
     expect(entry!.longEntry).toBeLessThanOrEqual(lastPrice + lastPrice * 0.05);
@@ -289,24 +371,23 @@ describe("getEntryForTimeframe", () => {
 
   it("returns valid entry for short side", () => {
     const candleMap: CandleMap = { "4H": makeTfCandles(50, 200) };
-    const entry = getEntryForTimeframe("4H", candleMap, "short");
+    const entry = getEntryForTimeframe("4H", candleMap, bearishBias, bearishTrendContext);
     expect(entry).not.toBeNull();
     expect(entry!.tf).toBe("4H");
     expect(entry!.shortEntry).toBeGreaterThan(0);
   });
 
-  it("different TFs produce different entries", () => {
+  it("supports higher dashboard timeframes like 12H and 1D", () => {
     const candleMap: CandleMap = {
-      "15M": makeTfCandles(80, 100),
-      "4H": makeTfCandles(80, 100),
+      "12H": makeTfCandles(80, 100),
+      "1D": makeTfCandles(80, 100),
     };
-    const entry15m = getEntryForTimeframe("15M", candleMap, "long");
-    const entry4h = getEntryForTimeframe("4H", candleMap, "long");
-    expect(entry15m).not.toBeNull();
-    expect(entry4h).not.toBeNull();
-    // They use the same data so entries may differ due to swing detection
-    expect(entry15m!.tf).toBe("15M");
-    expect(entry4h!.tf).toBe("4H");
+    const entry12h = getEntryForTimeframe("12H", candleMap, bullishBias, bullishTrendContext);
+    const entry1d = getEntryForTimeframe("1D", candleMap, bullishBias, bullishTrendContext);
+    expect(entry12h).not.toBeNull();
+    expect(entry1d).not.toBeNull();
+    expect(entry12h!.tf).toBe("12H");
+    expect(entry1d!.tf).toBe("1D");
   });
 });
 
@@ -352,5 +433,67 @@ describe("buildTrendContext slope-weighted", () => {
     const ctx = buildTrendContext(candleMap);
     expect(ctx.pressure).toBeDefined();
     expect(typeof ctx.pressure!.netPressure).toBe("number");
+  });
+});
+
+describe("news API integration", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    resetNewsCacheForTests();
+  });
+
+  it("maps API news into NewsItem with Hanoi time and sentiment", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        results: [
+          {
+            id: 1,
+            title: "Bitcoin breakout rally toward $90k",
+            source: { title: "CryptoPanic" },
+            published_at: "2026-03-12T01:00:00.000Z",
+            currencies: [{ code: "BTC" }],
+          },
+        ],
+      }),
+    } as Response);
+
+    const items = await fetchNewsFromApi("BTC/USDT");
+    expect(items).toHaveLength(1);
+    expect(items[0].source).toBe("CryptoPanic");
+    expect(items[0].publishedAt).toContain("GMT+7");
+    expect(items[0].sentimentLabel).toBe("bullish");
+  });
+
+  it("caches live news by symbol", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        results: [
+          {
+            id: 2,
+            title: "Bitcoin support holds despite volatility",
+            source: { title: "CryptoPanic" },
+            published_at: "2026-03-12T02:00:00.000Z",
+            currencies: [{ code: "BTC" }],
+          },
+        ],
+      }),
+    } as Response);
+
+    const first = await getNewsAsync("BTC/USDT");
+    const second = await getNewsAsync("BTC/USDT");
+
+    expect(first).toHaveLength(1);
+    expect(second).toHaveLength(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to static news when live API fails", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network"));
+
+    const items = await getNewsAsync("BTC/USDT");
+    expect(items.length).toBeGreaterThan(0);
+    expect(items[0].id.startsWith("btc-")).toBe(true);
   });
 });

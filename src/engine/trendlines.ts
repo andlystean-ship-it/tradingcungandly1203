@@ -457,6 +457,7 @@ export function buildTrendlinesWithDebug(
     broken: c.broken,
     slope: c.slope,
     span: c.span,
+    length: c.span,
     touchCount: Math.round(c.touchCount),
     violationCount: c.violations.hardCount + c.violations.softCount,
     role: c.role,
