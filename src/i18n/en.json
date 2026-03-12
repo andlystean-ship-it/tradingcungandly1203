@@ -111,7 +111,7 @@
     "minSwingDistance": "Min Swing Distance",
     "minPriceSeparation": "Min SR Price Separation (%)",
     "refreshInterval": "Refresh Interval (seconds)",
-    "refreshWarning": "You can set this as low as 1 second. Very small intervals can increase API and CPU load when refreshing continuously.",
+    "refreshWarning": "Default is 3 seconds. You can lower it to 1 second if needed, but very small intervals can increase API and CPU load during continuous refresh.",
     "srLevels": "S/R Levels Shown"
   },
   "chart": {

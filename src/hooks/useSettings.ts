@@ -44,7 +44,7 @@ const MAX_REFRESH_SEC = 600;
 const DEFAULT_ENGINE_CONFIG: EngineConfig = {
   minSwingDistance: 5,
   minPriceSeparationPct: 0.3,
-  refreshIntervalSec: 1,
+  refreshIntervalSec: 3,
 };
 
 const DEFAULT_SETTINGS: Settings = {

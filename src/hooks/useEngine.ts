@@ -4,7 +4,7 @@
  *   - Fetches real Binance candles on mount and symbol change
  *   - Last-good-snapshot: keeps previous valid output during refresh/symbol-change
  *   - Marks data as stale if refresh fails (keeps last-good-snapshot)
- *   - Auto-refreshes on configurable interval (default 1s)
+ *   - Auto-refreshes on configurable interval (default 3s)
  *   - Prevents overlapping refreshes when the previous request is still running
  *   - Accepts configurable engine parameters for swing/trendline tuning
  */
@@ -34,7 +34,7 @@ export type EngineState = {
 };
 
 /** Default refresh interval */
-const DEFAULT_REFRESH_SEC = 1;
+const DEFAULT_REFRESH_SEC = 3;
 
 export function useEngine(symbol: Symbol, config?: EngineConfig): EngineState {
   const refreshInterval = Math.max(1, config?.refreshIntervalSec ?? DEFAULT_REFRESH_SEC) * 1000;
