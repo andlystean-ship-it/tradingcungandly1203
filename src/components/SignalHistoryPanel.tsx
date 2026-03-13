@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import i18n from "../i18n";
 import type { Symbol } from "../types";
 import { getSignalHistory, type SignalSnapshot } from "../engine/signal-history";
 
@@ -41,9 +42,10 @@ export default function SignalHistoryPanel({ symbol }: Props) {
 }
 
 function formatHistoryTime(iso: string): string {
+  const locale = i18n.language === "vi" ? "vi-VN" : "en-US";
   try {
     const d = new Date(iso);
-    return d.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
+    return d.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
   } catch {
     return "--:--";
   }

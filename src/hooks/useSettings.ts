@@ -34,6 +34,8 @@ export type Settings = {
   lastSymbol: Symbol;
   engineConfig: EngineConfig;
   alerts: PriceAlert[];
+  geminiApiKey: string;
+  groqApiKey: string;
 };
 
 const STORAGE_KEY = "trading-settings";
@@ -53,6 +55,8 @@ const DEFAULT_SETTINGS: Settings = {
   lastSymbol: "XAU/USDT",
   engineConfig: DEFAULT_ENGINE_CONFIG,
   alerts: [],
+  geminiApiKey: "",
+  groqApiKey: "",
 };
 
 function loadSettings(): Settings {
@@ -71,6 +75,8 @@ function loadSettings(): Settings {
       ...parsed,
       engineConfig,
       alerts: Array.isArray(parsed.alerts) ? parsed.alerts : [],
+      geminiApiKey: typeof parsed.geminiApiKey === "string" ? parsed.geminiApiKey : "",
+      groqApiKey: typeof parsed.groqApiKey === "string" ? parsed.groqApiKey : "",
     };
   } catch {
     return DEFAULT_SETTINGS;
@@ -121,6 +127,14 @@ export function useSettings() {
     }));
   }, []);
 
+  const setGeminiApiKey = useCallback((geminiApiKey: string) => {
+    setSettings(s => ({ ...s, geminiApiKey }));
+  }, []);
+
+  const setGroqApiKey = useCallback((groqApiKey: string) => {
+    setSettings(s => ({ ...s, groqApiKey }));
+  }, []);
+
   const addAlert = useCallback((alert: Omit<PriceAlert, "id" | "triggered" | "createdAt">) => {
     const newAlert: PriceAlert = {
       ...alert,
@@ -154,8 +168,10 @@ export function useSettings() {
     setLanguage,
     setLastSymbol,
     setEngineConfig,
+    setGeminiApiKey,
+    setGroqApiKey,
     addAlert,
     removeAlert,
     triggerAlert,
-  }), [settings, setTheme, setLanguage, setLastSymbol, setEngineConfig, addAlert, removeAlert, triggerAlert]);
+  }), [settings, setTheme, setLanguage, setLastSymbol, setEngineConfig, setGeminiApiKey, setGroqApiKey, addAlert, removeAlert, triggerAlert]);
 }

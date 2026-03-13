@@ -53,8 +53,8 @@ function clampScore(value: number): number {
 
 function calcATR(candles: CandleData[], period = 14): number {
   const slice = candles.slice(-Math.min(period, candles.length));
-  if (slice.length === 0) return 0;
-  return slice.reduce((sum, candle) => sum + (candle.high - candle.low), 0) / slice.length;
+  if (slice.length === 0) return 0.0001;
+  return Math.max(slice.reduce((sum, candle) => sum + (candle.high - candle.low), 0) / slice.length, 0.0001);
 }
 
 function scorePivot(price: number, pivot: number, r1: number, s1: number, candles: CandleData[]): number {
@@ -265,7 +265,8 @@ export function scoreTimeframe(
   timeframe: Timeframe,
   candles: CandleData[],
   htfContext?: HTFContext,
-): TimeframeSignal {
+): TimeframeSignal | null {
+  if (candles.length < 2) return null;
   const levels = calcPivot(candles);
   const currentPrice = candles[candles.length - 1].close;
   const trendlines = buildTrendlines(candles, timeframe);

@@ -1,20 +1,29 @@
-import { useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { DataStatus, MarketBias, MarketScenario, TrendContext, TrendLayer, Trendline } from "../types";
+import type { CandleMap, DataStatus, MarketBias, MarketScenario, Symbol, TrendContext, TrendLayer, Trendline } from "../types";
+import { analyzeWithGemini, getCachedAnalysis, type GeminiAnalysis } from "../engine/gemini";
+import { TF_WEIGHTS } from "../engine/scoring";
 
-type TabId = "signals" | "analysis" | "trendlines";
+type TabId = "signals" | "analysis" | "trendlines" | "entries";
 
 type Props = {
   scenario: MarketScenario;
   trendContext: TrendContext;
   marketBias: MarketBias;
   dataStatus: DataStatus;
+  candleMap: CandleMap;
+  symbol: Symbol;
+  geminiApiKey: string;
+  groqApiKey: string;
 };
 
-export default function ChartTabs({ scenario, trendContext, marketBias, dataStatus }: Props) {
+export default function ChartTabs({ scenario, trendContext, marketBias, dataStatus, candleMap, symbol, geminiApiKey, groqApiKey }: Props) {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<TabId>("signals");
-  const activeTrendlines = scenario.trendlines.filter((trendline) => trendline.active);
+  const activeTrendlines = useMemo(
+    () => scenario.trendlines.filter((trendline) => trendline.active),
+    [scenario.trendlines],
+  );
 
   return (
     <>
@@ -47,6 +56,15 @@ export default function ChartTabs({ scenario, trendContext, marketBias, dataStat
           <span>{t("tabs.trendlines")}</span>
           <span className="trend-count">{activeTrendlines.length}</span>
         </button>
+        <button
+          className={`chart-tab ${activeTab === "entries" ? "active" : ""}`}
+          onClick={() => setActiveTab("entries")}
+          role="tab"
+          aria-selected={activeTab === "entries"}
+        >
+          <span className="chart-tab-icon" aria-hidden="true">E</span>
+          <span>{t("tabs.entries")}</span>
+        </button>
       </div>
 
       <div className="tab-content" role="tabpanel">
@@ -57,9 +75,14 @@ export default function ChartTabs({ scenario, trendContext, marketBias, dataStat
             trendContext={trendContext}
             marketBias={marketBias}
             dataStatus={dataStatus}
+            candleMap={candleMap}
+            symbol={symbol}
+            geminiApiKey={geminiApiKey}
+            groqApiKey={groqApiKey}
           />
         )}
         {activeTab === "trendlines" && <TrendlinesTab trendlines={activeTrendlines} />}
+        {activeTab === "entries" && <EntriesTab scenario={scenario} />}
       </div>
     </>
   );
@@ -92,7 +115,7 @@ function SignalsTab({ scenario }: { scenario: MarketScenario }) {
       </div>
 
       {!!scenario.stepByStepSignal?.length && (
-        <div className="analysis-list" style={{ marginTop: 12 }}>
+        <div className="analysis-list mt-sig">
           {scenario.stepByStepSignal.map((step, index) => (
             <div key={`${index}-${step}`} className="analysis-item">
               <div className="analysis-dot cyan" />
@@ -103,7 +126,7 @@ function SignalsTab({ scenario }: { scenario: MarketScenario }) {
       )}
 
       {!!scenario.candlePatterns?.length && (
-        <div className="analysis-list" style={{ marginTop: 12 }}>
+        <div className="analysis-list mt-sig">
           {scenario.candlePatterns.slice(0, 4).map((pattern) => (
             <div key={`${pattern.timeframe}-${pattern.candleIndex}-${pattern.name}`} className="analysis-item">
               <div className={`analysis-dot ${pattern.direction === "bullish" ? "green" : pattern.direction === "bearish" ? "red" : "yellow"}`} />
@@ -121,13 +144,51 @@ function AnalysisTab({
   trendContext,
   marketBias,
   dataStatus,
+  candleMap,
+  symbol,
+  geminiApiKey,
+  groqApiKey,
 }: {
   scenario: MarketScenario;
   trendContext: TrendContext;
   marketBias: MarketBias;
   dataStatus: DataStatus;
+  candleMap: CandleMap;
+  symbol: Symbol;
+  geminiApiKey: string;
+  groqApiKey: string;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const [aiAnalysis, setAiAnalysis] = useState<GeminiAnalysis | null>(() => getCachedAnalysis());
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+
+  const hasAnyKey = !!(geminiApiKey || groqApiKey);
+
+  const handleAskAI = useCallback(async () => {
+    if (!hasAnyKey) {
+      setAiError(t("ai.noKey"));
+      return;
+    }
+    setAiLoading(true);
+    setAiError(null);
+    try {
+      const result = await analyzeWithGemini(
+        geminiApiKey,
+        symbol,
+        candleMap,
+        scenario.currentPrice,
+        i18n.language,
+        groqApiKey,
+      );
+      setAiAnalysis(result);
+    } catch (err) {
+      setAiError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setAiLoading(false);
+    }
+  }, [hasAnyKey, geminiApiKey, groqApiKey, symbol, candleMap, scenario.currentPrice, i18n.language, t]);
+
   const isAbovePivot = scenario.currentPrice >= scenario.pivot;
   const items = [
     {
@@ -175,6 +236,36 @@ function AnalysisTab({
         ))}
       </div>
 
+      <div className="ai-analysis-section">
+        <div className="ai-analysis-header">
+          <span className="ai-analysis-title">🤖 Gemini AI</span>
+          <button
+            className="ai-ask-btn"
+            onClick={handleAskAI}
+            disabled={aiLoading}
+          >
+            {aiLoading ? t("ai.loading") : t("ai.ask")}
+          </button>
+        </div>
+
+        {aiError && (
+          <div className="ai-error">{aiError}</div>
+        )}
+
+        {aiAnalysis && (
+          <div className="ai-response">
+            <div className="ai-response-text">{aiAnalysis.summary}</div>
+            <div className="ai-response-meta">
+              {aiAnalysis.model} · {new Date(aiAnalysis.timestamp).toLocaleTimeString()}
+            </div>
+          </div>
+        )}
+
+        {!aiAnalysis && !aiError && !aiLoading && (
+          <div className="ai-placeholder">{t("ai.placeholder")}</div>
+        )}
+      </div>
+
       <EngineDebugPanel
         trendContext={trendContext}
         marketBias={marketBias}
@@ -193,6 +284,7 @@ function EngineDebugPanel({
   marketBias: MarketBias;
   dataStatus: DataStatus;
 }) {
+  const { t } = useTranslation();
   const htfAgreement = marketBias.htfAgreement ?? 50;
   const conflictFlags = marketBias.conflictFlags?.length
     ? marketBias.conflictFlags.join(" | ")
@@ -204,25 +296,25 @@ function EngineDebugPanel({
   return (
     <div className="engine-debug-panel">
       <div className="engine-debug-header">
-        <div className="engine-debug-title">Engine Debug</div>
+        <div className="engine-debug-title">{t("debug.title")}</div>
         <div className="engine-debug-badge">{dataStatus.sourceMode.toUpperCase()}</div>
       </div>
 
       <div className="engine-debug-grid">
-        <DebugMetric label="Alignment" value={trendContext.alignment} />
-        <DebugMetric label="HTF agreement" value={`${htfAgreement}%`} />
-        <DebugMetric label="Pressure" value={`${trendContext.pressure?.dominantPressureDirection ?? "neutral"} | ${trendContext.pressure?.pressureStrength ?? 0}`} />
-        <DebugMetric label="Completeness" value={`${dataStatus.timeframeCompleteness ?? 100}%`} />
+        <DebugMetric label={t("debug.alignment")} value={trendContext.alignment} />
+        <DebugMetric label={t("debug.htfAgreement")} value={`${htfAgreement}%`} />
+        <DebugMetric label={t("debug.pressure")} value={`${trendContext.pressure?.dominantPressureDirection ?? "neutral"} | ${trendContext.pressure?.pressureStrength ?? 0}`} />
+        <DebugMetric label={t("debug.completeness")} value={`${dataStatus.timeframeCompleteness ?? 100}%`} />
       </div>
 
-      <div className="engine-debug-note">Conflict flags: {conflictFlags}</div>
-      <div className="engine-debug-note">Missing TF: {missingTf}</div>
-      <div className="engine-debug-note">Pressure reason: {trendContext.pressure?.pressureReason ?? "n/a"}</div>
+      <div className="engine-debug-note">{t("debug.conflictFlags")} {conflictFlags}</div>
+      <div className="engine-debug-note">{t("debug.missingTF")} {missingTf}</div>
+      <div className="engine-debug-note">{t("debug.pressureReason")} {trendContext.pressure?.pressureReason ?? "n/a"}</div>
 
       <div className="engine-debug-layers">
-        <LayerCard title="Short 1H" layer={trendContext.shortTerm} />
-        <LayerCard title="Medium 4H" layer={trendContext.mediumTerm} />
-        <LayerCard title="HTF 12H/1D/1W" layer={trendContext.higherTimeframe} />
+        <LayerCard title={t("debug.layerShort")} layer={trendContext.shortTerm} />
+        <LayerCard title={t("debug.layerMedium")} layer={trendContext.mediumTerm} />
+        <LayerCard title={t("debug.layerHTF")} layer={trendContext.higherTimeframe} />
       </div>
     </div>
   );
@@ -238,24 +330,73 @@ function DebugMetric({ label, value }: { label: string; value: string }) {
 }
 
 function LayerCard({ title, layer }: { title: string; layer: TrendLayer }) {
+  const { t } = useTranslation();
   const rationale = layer.rationale?.length ? layer.rationale.join(" | ") : "n/a";
 
   return (
     <div className="engine-layer-card">
       <div className="engine-layer-title">{title}</div>
       <div className="engine-layer-row">
-        <span>dir: {layer.direction}</span>
-        <span>strength: {layer.strength}</span>
+        <span>{t("debug.dir")}: {layer.direction}</span>
+        <span>{t("debug.strength")}: {layer.strength}</span>
       </div>
       <div className="engine-layer-row">
-        <span>structure: {layer.structureState ?? "n/a"}</span>
-        <span>ema: {layer.emaState ?? "n/a"}</span>
+        <span>{t("debug.structure")}: {layer.structureState ?? "n/a"}</span>
+        <span>{t("debug.ema")}: {layer.emaState ?? "n/a"}</span>
       </div>
       <div className="engine-layer-row">
-        <span>trendline: {layer.trendlineState ?? "n/a"}</span>
-        <span>pressure: {layer.pressureState ?? "n/a"}</span>
+        <span>{t("debug.trendline")}: {layer.trendlineState ?? "n/a"}</span>
+        <span>{t("debug.pressureLabel")}: {layer.pressureState ?? "n/a"}</span>
       </div>
       <div className="engine-layer-note">{rationale}</div>
+    </div>
+  );
+}
+
+function EntriesTab({ scenario }: { scenario: MarketScenario }) {
+  const { t } = useTranslation();
+  const entries = scenario.entriesByTF ?? [];
+
+  const weighted = entries.reduce(
+    (acc, e) => {
+      const w = TF_WEIGHTS[e.tf] ?? 1;
+      acc.weightSum += w;
+      acc.scoreSum += (e.qualityScore ?? 50) * w;
+      return acc;
+    },
+    { weightSum: 0, scoreSum: 0 },
+  );
+
+  const overall = weighted.weightSum > 0 ? Math.round(weighted.scoreSum / weighted.weightSum) : 0;
+
+  if (entries.length === 0) {
+    return (
+      <div style={{ color: "var(--text-muted)", fontSize: 12, padding: "8px 0" }}>
+        {t("signalHistory.noHistory")}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="analysis-list" style={{ marginBottom: 8 }}>
+        <div className="analysis-item">
+          <div className="analysis-dot cyan" />
+          <div className="analysis-text">{t("tabs.entries")} · {t("analysis.trendlineCount", { count: entries.length })} · Overall Score: {overall}</div>
+        </div>
+      </div>
+
+      <div className="analysis-list">
+        {entries.map((e) => (
+          <div key={`${e.tf}-${e.preferredSide}-${e.longEntry}-${e.shortEntry}`} className="analysis-item">
+            <div className={`analysis-dot ${e.preferredSide === "long" ? "green" : e.preferredSide === "short" ? "red" : "yellow"}`} />
+            <div className="analysis-text">
+              <strong>{e.tf}</strong> — {e.preferredSide?.toUpperCase() ?? "NEUTRAL"} · Entry: {((e.preferredSide === "short") ? e.shortEntry : e.longEntry)?.toFixed(2)} · Quality: {e.qualityScore ?? "n/a"} {e.actionable ? "· Actionable" : ""}
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>{(e.reasons ?? []).slice(0, 5).join(" · ")}</div>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

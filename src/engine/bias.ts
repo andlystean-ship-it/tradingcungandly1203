@@ -14,6 +14,7 @@
 import type { TimeframeSignal, MarketBias, BiasDebug, CandleData, Trendline, TrendContext } from "../types";
 import { TF_WEIGHTS } from "./scoring";
 import { calcPivot } from "./pivot";
+import i18n from "../i18n";
 
 export type BiasContext = {
   chartCandles?: CandleData[];
@@ -147,17 +148,17 @@ export function computeBias(
 
   if (confidence < 20) {
     dominantSide = "neutral";
-    neutralReason = `confidence quá thấp (${confidence}%)`;
+    neutralReason = i18n.t("bias_reason.confidenceLow", { value: confidence });
   } else if (bullishPercent >= 47 && bullishPercent <= 53) {
     dominantSide = "neutral";
-    neutralReason = `bullish/bearish gần bằng nhau (${bullishPercent}/${bearishPercent})`;
+    neutralReason = i18n.t("bias_reason.nearEqual", { bull: bullishPercent, bear: bearishPercent });
   } else if (hasConflict && conflictLevel > 30 && context?.trendContext?.alignment === "mixed") {
     dominantSide = "neutral";
-    neutralReason = `LTF/HTF xung đột lớn (${conflictLevel.toFixed(0)}) + trend trái chiều`;
+    neutralReason = i18n.t("bias_reason.ltfHtfConflict", { level: conflictLevel.toFixed(0) });
   } else {
     dominantSide = bullishPercent > 53 ? "long" : bullishPercent < 47 ? "short" : "neutral";
     if (dominantSide === "neutral") {
-      neutralReason = "bullish/bearish trong vùng trung lập";
+      neutralReason = i18n.t("bias_reason.neutralZone");
     }
   }
 

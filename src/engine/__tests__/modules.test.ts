@@ -307,13 +307,13 @@ describe("scoreTimeframe", () => {
   }
 
   it("scores a sustained uptrend as bullish", () => {
-    const signal = scoreTimeframe("4H", makeDirectionalCandles("up", 220, 100));
+    const signal = scoreTimeframe("4H", makeDirectionalCandles("up", 220, 100))!;
     expect(signal.bullishScore).toBeGreaterThan(55);
     expect(signal.bias).toBe("bullish");
   });
 
   it("scores a sustained downtrend as bearish", () => {
-    const signal = scoreTimeframe("4H", makeDirectionalCandles("down", 220, 100));
+    const signal = scoreTimeframe("4H", makeDirectionalCandles("down", 220, 100))!;
     expect(signal.bullishScore).toBeLessThan(45);
     expect(signal.bias).toBe("bearish");
   });
@@ -323,7 +323,7 @@ describe("scoreTimeframe", () => {
       ...candle,
       volume: index === list.length - 1 ? 3200 : 1400 + index * 3,
     }));
-    const signal = scoreTimeframe("4H", candles);
+    const signal = scoreTimeframe("4H", candles)!;
     expect(signal.volumeMetrics).toBeDefined();
     expect(signal.volumeMetrics!.volumeState).toBe("expanding");
     expect(signal.volumeMetrics!.score).toBeGreaterThan(50);

@@ -1,8 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import "./App.css";
 import type { Symbol, Direction, NewsItem } from "./types";
 import { getNews, getNewsAsync } from "./engine/index";
+import { fetchGeminiNews, isNewsCacheStale, getCachedNews } from "./engine/gemini";
 import { useEngine } from "./hooks/useEngine";
 import { useSettings } from "./hooks/useSettings";
 import { useAlerts } from "./hooks/useAlerts";
@@ -24,6 +25,8 @@ export default function App() {
     setLanguage,
     setLastSymbol,
     setEngineConfig,
+    setGeminiApiKey,
+    setGroqApiKey,
     addAlert,
     removeAlert,
     triggerAlert,
@@ -46,14 +49,52 @@ export default function App() {
     setLastSymbol(s);
   };
 
-  // Fetch live news with a short-lived honest fallback when no verified feed is available.
+  // Fetch news: use AI providers if keys are set, otherwise fallback to CryptoPanic/NewsAPI
+  const geminiKey = settings.geminiApiKey;
+  const groqKey = settings.groqApiKey;
+  const langRef = useRef(settings.language);
+  useEffect(() => {
+    langRef.current = settings.language;
+  }, [settings.language]);
+
+  const fetchNews = useCallback(async () => {
+    if (geminiKey || groqKey) {
+      // Only fetch from AI if cache is stale
+      if (isNewsCacheStale(symbol)) {
+        const items = await fetchGeminiNews(geminiKey, symbol, langRef.current, groqKey);
+        if (items.length > 0) {
+          setNews(items);
+          return;
+        }
+      } else {
+        const cached = getCachedNews();
+        if (cached.length > 0) {
+          setNews(cached);
+          return;
+        }
+      }
+    }
+    // Fallback to existing providers
+    const items = await getNewsAsync(symbol);
+    setNews(items);
+  }, [geminiKey, groqKey, symbol]);
+
   useEffect(() => {
     let cancelled = false;
-    getNewsAsync(symbol).then((items) => {
-      if (!cancelled) setNews(items);
+    fetchNews().then(() => {
+      if (cancelled) return;
     });
-    return () => { cancelled = true; };
-  }, [symbol]);
+
+    // Auto-refresh every 10 minutes
+    const interval = setInterval(() => {
+      if (!cancelled) fetchNews();
+    }, 10 * 60 * 1000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [fetchNews]);
 
   // Price alert monitoring
   useAlerts(
@@ -126,12 +167,20 @@ export default function App() {
         candleMap={engine.candleMap}
         scenario={engine.marketScenario}
         theme={settings.theme}
+        engineConfig={settings.engineConfig}
+        geminiApiKey={settings.geminiApiKey}
+        groqApiKey={settings.groqApiKey}
+        symbol={symbol}
       />
       <ChartTabs
         scenario={engine.marketScenario}
         trendContext={engine.trendContext}
         marketBias={engine.marketBias}
         dataStatus={engine.dataStatus}
+        candleMap={engine.candleMap}
+        symbol={symbol}
+        geminiApiKey={settings.geminiApiKey}
+        groqApiKey={settings.groqApiKey}
       />
       <SignalHistoryPanel symbol={symbol} />
       <NewsPanel news={news} symbol={symbol} />
@@ -143,11 +192,15 @@ export default function App() {
         symbol={symbol}
         alerts={settings.alerts}
         engineConfig={settings.engineConfig}
+        geminiApiKey={settings.geminiApiKey}
+        groqApiKey={settings.groqApiKey}
         onThemeChange={setTheme}
         onLanguageChange={setLanguage}
         onAddAlert={addAlert}
         onRemoveAlert={removeAlert}
         onEngineConfigChange={setEngineConfig}
+        onGeminiApiKeyChange={setGeminiApiKey}
+        onGroqApiKeyChange={setGroqApiKey}
       />
     </div>
   );

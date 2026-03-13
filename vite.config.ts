@@ -17,7 +17,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/api/binance': {
-        target: 'https://api.binance.com',
+        target: 'https://fapi.binance.com/fapi/v1',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/binance/, ''),
       },

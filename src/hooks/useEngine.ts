@@ -120,6 +120,7 @@ export function useEngine(symbol: Symbol, config?: EngineConfig): EngineState {
   symbolRef.current = symbol;
   const isRefreshingRef = useRef(false);
   const lastWsRefreshAtRef = useRef(0);
+  const lockedEntryRef = useRef<{ side: "long" | "short"; entry: number; invalidation: number } | null>(null);
 
   const refresh = useCallback(async (isInitial: boolean) => {
     if (isRefreshingRef.current) return;
@@ -133,7 +134,7 @@ export function useEngine(symbol: Symbol, config?: EngineConfig): EngineState {
               minPriceSeparationPct: config.minPriceSeparationPct,
             }
           : undefined;
-      const result = await runEngineAsync(symbolRef.current, coreConfig);
+      const result = await runEngineAsync(symbolRef.current, coreConfig, lockedEntryRef.current ?? undefined);
       // Only apply if symbol hasn't changed while we were fetching
       if (result.symbol === symbolRef.current) {
         setOutput(result);
@@ -142,6 +143,24 @@ export function useEngine(symbol: Symbol, config?: EngineConfig): EngineState {
 
         // Record signal snapshot for history
         recordSignal(result.symbol, result.marketScenario, result.marketBias);
+
+        // If we just entered an active state, lock the entry so it doesn't shift
+        const status = result.marketScenario.status;
+        if (status === "active_long") {
+          lockedEntryRef.current = {
+            side: "long",
+            entry: result.marketScenario.pendingLong,
+            invalidation: result.marketScenario.invalidationLevel,
+          };
+        } else if (status === "active_short") {
+          lockedEntryRef.current = {
+            side: "short",
+            entry: result.marketScenario.pendingShort,
+            invalidation: result.marketScenario.invalidationLevel,
+          };
+        } else if (status === "invalidated" || status === "watching" || status === "idle") {
+          lockedEntryRef.current = null;
+        }
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Engine error";
@@ -162,6 +181,7 @@ export function useEngine(symbol: Symbol, config?: EngineConfig): EngineState {
     let cancelled = false;
 
     // Reset state for new symbol — keep last output visible (last-good-snapshot)
+    lockedEntryRef.current = null;
     setInitializing(output === null || output.symbol !== symbol);
     setLoading(true);
     setError(null);

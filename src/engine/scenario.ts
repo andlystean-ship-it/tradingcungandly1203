@@ -53,6 +53,11 @@ export type ScenarioInput = {
   chartTrendlines: Trendline[];
   trendContext: TrendContext;
   symbol: Symbol;
+  lockedEntry?: {
+    side: "long" | "short";
+    entry: number;
+    invalidation: number;
+  };
 };
 
 type Zone = "bull2" | "bull1" | "trans" | "bear1" | "bear2";
@@ -579,16 +584,16 @@ function assessEntryQuality(
 
   if (rewardRisk < ENTRY_QUALITY.minRewardRisk) {
     tradeable = false;
-    rejectReason = `R:R quá thấp (${rewardRisk.toFixed(1)} < ${ENTRY_QUALITY.minRewardRisk})`;
+    rejectReason = i18n.t("scenario.rejectRR", { rr: rewardRisk.toFixed(1), min: ENTRY_QUALITY.minRewardRisk });
   } else if (confluences < ENTRY_QUALITY.minConfluences) {
     tradeable = false;
-    rejectReason = `Chưa đủ confluence (${confluences} < ${ENTRY_QUALITY.minConfluences})`;
+    rejectReason = i18n.t("scenario.rejectConfluence", { count: confluences, min: ENTRY_QUALITY.minConfluences });
   } else if (qualityScore < ENTRY_QUALITY.minQualityScore) {
     tradeable = false;
-    rejectReason = `Chất lượng setup thấp (${qualityScore} < ${ENTRY_QUALITY.minQualityScore})`;
+    rejectReason = i18n.t("scenario.rejectQuality", { score: qualityScore, min: ENTRY_QUALITY.minQualityScore });
   } else if (structureQuality < ENTRY_QUALITY.minStructureQuality) {
     tradeable = false;
-    rejectReason = `Cấu trúc S/R yếu tại entry (${structureQuality} < ${ENTRY_QUALITY.minStructureQuality})`;
+    rejectReason = i18n.t("scenario.rejectStructure", { score: structureQuality, min: ENTRY_QUALITY.minStructureQuality });
   }
 
   return { tradeable, rewardRisk, confluences, confluenceLabels, qualityScore, rejectReason, factors };
@@ -888,8 +893,23 @@ export function buildScenario(input: ScenarioInput): MarketScenario {
   pendingShort = fix(pendingShort);
   invalidationLevel = fix(invalidationLevel);
 
-  // ── Confirmation-based status ──────────────────────────────────────────────
-  let status = deriveStatus(chartCandles, pendingLong, pendingShort, invalidationLevel, primarySide);
+  // ── Confirmation-based status (lock entry once it becomes active)
+  let status: SignalStatus;
+  if (input.lockedEntry) {
+    // Keep the locked entry/invalidation levels fixed while still active.
+    const locked = input.lockedEntry;
+    if (locked.side === "long") {
+      pendingLong = locked.entry;
+      invalidationLevel = locked.invalidation;
+      status = currentPrice < invalidationLevel ? "invalidated" : "active_long";
+    } else {
+      pendingShort = locked.entry;
+      invalidationLevel = locked.invalidation;
+      status = currentPrice > invalidationLevel ? "invalidated" : "active_short";
+    }
+  } else {
+    status = deriveStatus(chartCandles, pendingLong, pendingShort, invalidationLevel, primarySide);
+  }
 
   // ── Entry quality gate — assess BOTH sides ────────────────────────────────
   const atr = approxATR(chartCandles);
@@ -909,8 +929,8 @@ export function buildScenario(input: ScenarioInput): MarketScenario {
     status = "low_quality_setup";
   }
 
-  // Neutral primary → force watching regardless
-  if (primarySide === "neutral" && status !== "invalidated") {
+  // Neutral primary → force watching regardless (unless we have a locked active entry)
+  if (!input.lockedEntry && primarySide === "neutral" && status !== "invalidated") {
     status = "watching";
   }
 

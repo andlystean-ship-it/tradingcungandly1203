@@ -25,8 +25,8 @@ import { FETCH_COUNTS } from "./windows";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const BINANCE_BASE = import.meta.env?.DEV
-  ? "/api/binance/api/v3"
-  : "https://api.binance.com/api/v3";
+  ? "/api/binance"
+  : "https://fapi.binance.com/fapi/v1";
 const FETCH_TIMEOUT_MS = 8000;
 const BINANCE_MAX_KLINES_PER_REQUEST = 1500;
 
@@ -63,21 +63,21 @@ export type ProviderInfo = {
 
 const PROVIDER_INFO: Record<string, ProviderInfo> = {
   "XAU/USDT": {
-    provider: "Binance PAXG proxy",
+    provider: "Binance Futures (PAXG)",
     actualPair: "PAXGUSDT",
-    proxyWarning: "This is Pax Gold (PAXG), not true XAU spot. Prices may deviate from London spot gold.",
+    proxyWarning: "This is Pax Gold futures (PAXG). Prices may differ from spot.",
   },
-  "BTC/USDT": { provider: "Binance Spot", actualPair: "BTCUSDT" },
-  "ETH/USDT": { provider: "Binance Spot", actualPair: "ETHUSDT" },
-  "SOL/USDT": { provider: "Binance Spot", actualPair: "SOLUSDT" },
-  "BNB/USDT": { provider: "Binance Spot", actualPair: "BNBUSDT" },
-  "XRP/USDT": { provider: "Binance Spot", actualPair: "XRPUSDT" },
-  "ADA/USDT": { provider: "Binance Spot", actualPair: "ADAUSDT" },
-  "DOGE/USDT": { provider: "Binance Spot", actualPair: "DOGEUSDT" },
-  "DOT/USDT": { provider: "Binance Spot", actualPair: "DOTUSDT" },
-  "AVAX/USDT": { provider: "Binance Spot", actualPair: "AVAXUSDT" },
-  "LINK/USDT": { provider: "Binance Spot", actualPair: "LINKUSDT" },
-  "SUI/USDT": { provider: "Binance Spot", actualPair: "SUIUSDT" },
+  "BTC/USDT": { provider: "Binance Futures", actualPair: "BTCUSDT" },
+  "ETH/USDT": { provider: "Binance Futures", actualPair: "ETHUSDT" },
+  "SOL/USDT": { provider: "Binance Futures", actualPair: "SOLUSDT" },
+  "BNB/USDT": { provider: "Binance Futures", actualPair: "BNBUSDT" },
+  "XRP/USDT": { provider: "Binance Futures", actualPair: "XRPUSDT" },
+  "ADA/USDT": { provider: "Binance Futures", actualPair: "ADAUSDT" },
+  "DOGE/USDT": { provider: "Binance Futures", actualPair: "DOGEUSDT" },
+  "DOT/USDT": { provider: "Binance Futures", actualPair: "DOTUSDT" },
+  "AVAX/USDT": { provider: "Binance Futures", actualPair: "AVAXUSDT" },
+  "LINK/USDT": { provider: "Binance Futures", actualPair: "LINKUSDT" },
+  "SUI/USDT": { provider: "Binance Futures", actualPair: "SUIUSDT" },
 };
 
 export function getProviderInfo(symbol: Symbol): ProviderInfo {

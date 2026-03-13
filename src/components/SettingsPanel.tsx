@@ -11,11 +11,15 @@ type Props = {
   symbol: Symbol;
   alerts: PriceAlert[];
   engineConfig: EngineConfig;
+  geminiApiKey: string;
+  groqApiKey: string;
   onThemeChange: (t: Theme) => void;
   onLanguageChange: (l: string) => void;
   onAddAlert: (alert: { symbol: Symbol; price: number; direction: "above" | "below" }) => void;
   onRemoveAlert: (id: string) => void;
   onEngineConfigChange: (config: Partial<EngineConfig>) => void;
+  onGeminiApiKeyChange: (key: string) => void;
+  onGroqApiKeyChange: (key: string) => void;
 };
 
 export default function SettingsPanel({
@@ -26,11 +30,15 @@ export default function SettingsPanel({
   symbol,
   alerts,
   engineConfig,
+  geminiApiKey,
+  groqApiKey,
   onThemeChange,
   onLanguageChange,
   onAddAlert,
   onRemoveAlert,
   onEngineConfigChange,
+  onGeminiApiKeyChange,
+  onGroqApiKeyChange,
 }: Props) {
   const { t } = useTranslation();
   const [alertPrice, setAlertPrice] = useState("");
@@ -68,6 +76,37 @@ export default function SettingsPanel({
               <option value="dark">{t("settings.dark")}</option>
               <option value="light">{t("settings.light")}</option>
             </select>
+          </div>
+        </div>
+
+        <div className="settings-group">
+          <div className="settings-group-title">🤖 AI Providers</div>
+          <div className="settings-row">
+            <span className="settings-label">Gemini</span>
+            <input
+              className="alert-input"
+              type="password"
+              placeholder="AIza..."
+              value={geminiApiKey}
+              onChange={e => onGeminiApiKeyChange(e.target.value.trim())}
+              aria-label={t("settings.geminiKey")}
+              style={{ flex: 1, minWidth: 0 }}
+            />
+          </div>
+          <div className="settings-row">
+            <span className="settings-label">Groq</span>
+            <input
+              className="alert-input"
+              type="password"
+              placeholder="gsk_..."
+              value={groqApiKey}
+              onChange={e => onGroqApiKeyChange(e.target.value.trim())}
+              aria-label="Groq API Key"
+              style={{ flex: 1, minWidth: 0 }}
+            />
+          </div>
+          <div style={{ fontSize: 11, color: "var(--text-muted)", paddingTop: 4 }}>
+            {t("settings.geminiHint")}
           </div>
         </div>
 

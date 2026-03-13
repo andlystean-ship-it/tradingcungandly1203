@@ -14,9 +14,11 @@ import { detectSwingHighs, detectSwingLows, type SwingPoint, type SwingConfig, D
 
 // ── Configuration ────────────────────────────────────────────────────────────
 
-const MAX_CANDIDATES_PER_DIRECTION = 40;
-const MAX_OUTPUT_LINES = 8;
-const TOUCH_TOLERANCE_ATR_MULT = 0.5;
+const MAX_CANDIDATES_PER_DIRECTION = 30;
+const MAX_OUTPUT_LINES = 3;
+const TOUCH_TOLERANCE_ATR_MULT = 0.35;
+const MIN_SPAN_RATIO = 0.12; // trendline must span >= 12% of visible data
+const MIN_SCORE = 25;
 
 // ── Violation types ──────────────────────────────────────────────────────────
 
@@ -124,6 +126,29 @@ function countTouches(
 
 // ── Violation evaluation ─────────────────────────────────────────────────────
 
+/** Count candle bodies that cross the line BETWEEN the two anchors */
+function countIntraAnchorViolations(
+  candles: CandleData[],
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  kind: "ascending" | "descending",
+  tolerance: number,
+): number {
+  let count = 0;
+  for (let i = x1 + 1; i < x2; i++) {
+    const lineY = extrapolate(x1, y1, x2, y2, i);
+    const c = candles[i];
+    if (kind === "ascending" && c.close < lineY - tolerance * 0.5) {
+      count++;
+    } else if (kind === "descending" && c.close > lineY + tolerance * 0.5) {
+      count++;
+    }
+  }
+  return count;
+}
+
 function evaluateViolations(
   candles: CandleData[],
   x1: number,
@@ -185,9 +210,10 @@ function scoreCandidate(
   const slopePerBar = Math.abs(candidate.slope);
   const slopeATRRatio = atr > 0 ? slopePerBar / atr : 0;
   let slopeSanity = 80;
-  if (slopeATRRatio < 0.001) slopeSanity = 20;
-  else if (slopeATRRatio > 0.5) slopeSanity = 10;
-  else if (slopeATRRatio > 0.3) slopeSanity = 40;
+  if (slopeATRRatio < 0.0008) slopeSanity = 10;   // nearly flat → likely noise
+  else if (slopeATRRatio < 0.002) slopeSanity = 30;
+  else if (slopeATRRatio > 0.4) slopeSanity = 5;   // too steep → spike
+  else if (slopeATRRatio > 0.25) slopeSanity = 30;
   reasons.push(`slp=${slopeSanity}`);
 
   // 3. Span (wider = better)
@@ -231,12 +257,12 @@ function scoreCandidate(
   reasons.push(`prox=${proximity}`);
 
   const score = Math.round(
-    anchorQuality * 0.15 +
-      slopeSanity * 0.10 +
-      spanNorm * 0.15 +
-      touchBonus * 0.20 +
-      violScore * 0.15 +
-      recency * 0.15 +
+    anchorQuality * 0.10 +
+      slopeSanity * 0.12 +
+      spanNorm * 0.13 +
+      touchBonus * 0.30 +
+      violScore * 0.12 +
+      recency * 0.13 +
       proximity * 0.10
   );
 
@@ -266,7 +292,7 @@ function generateCandidates(
       const b = swings[j];
       if (kind === "ascending" && b.price <= a.price) continue;
       if (kind === "descending" && b.price >= a.price) continue;
-      if (b.index - a.index < 3) continue;
+      if (b.index - a.index < 5) continue; // at least 5 bars apart
       pairs.push([i, j]);
     }
   }
@@ -296,6 +322,13 @@ function generateCandidates(
       kind,
       tolerance
     );
+
+    // Reject if too many candle bodies cross the line between anchors
+    const intraViolations = countIntraAnchorViolations(
+      candles, a.index, a.price, b.index, b.price, kind, tolerance
+    );
+    const maxIntra = Math.max(2, Math.floor(span * 0.15));
+    if (intraViolations > maxIntra) continue;
 
     const violations = evaluateViolations(
       candles,
@@ -337,6 +370,41 @@ function generateCandidates(
   }
 
   return candidates;
+}
+
+// ── Near-parallel dedup ──────────────────────────────────────────────────────
+
+function dedupNearParallel(
+  candidates: TrendlineCandidate[],
+  atr: number,
+  totalCandles: number,
+): TrendlineCandidate[] {
+  if (candidates.length <= 1) return candidates;
+
+  const result: TrendlineCandidate[] = [];
+  const midIndex = Math.floor(totalCandles / 2);
+
+  for (const c of candidates) {
+    // Project each candidate's price at the midpoint of the data
+    const projMid = extrapolate(c.anchor1.index, c.anchor1.price, c.anchor2.index, c.anchor2.price, midIndex);
+    const slopePerBar = c.slope;
+
+    const isTooSimilar = result.some((existing) => {
+      const existProjMid = extrapolate(
+        existing.anchor1.index, existing.anchor1.price,
+        existing.anchor2.index, existing.anchor2.price, midIndex,
+      );
+      const priceDist = Math.abs(projMid - existProjMid);
+      const slopeDist = Math.abs(slopePerBar - existing.slope);
+      // Lines within 0.6 ATR at midpoint AND similar slope → duplicates
+      return priceDist < atr * 0.6 && slopeDist < atr * 0.05;
+    });
+
+    if (!isTooSimilar) {
+      result.push(c);
+    }
+  }
+  return result;
 }
 
 // ── Main entry points ────────────────────────────────────────────────────────
@@ -406,27 +474,54 @@ export function buildTrendlinesWithDebug(
     const slopePerBar = Math.abs(c.slope);
     const slopeATRRatio = atr > 0 ? slopePerBar / atr : 0;
 
-    if (slopeATRRatio < 0.0005) {
+    if (slopeATRRatio < 0.0008) {
       rejectionReasons.push(
         `${c.kind}@${c.anchor1.index}-${c.anchor2.index}: too flat`
       );
       return false;
     }
-    if (slopeATRRatio > 0.5) {
+    if (slopeATRRatio > 0.35) {
       rejectionReasons.push(
         `${c.kind}@${c.anchor1.index}-${c.anchor2.index}: too steep`
       );
       return false;
     }
-    if (c.anchor1.significance < 15 && c.anchor2.significance < 15) {
+    // Verify slope direction matches kind
+    if (c.kind === "ascending" && c.slope < 0) {
+      rejectionReasons.push(
+        `${c.kind}@${c.anchor1.index}-${c.anchor2.index}: slope contradicts direction`
+      );
+      return false;
+    }
+    if (c.kind === "descending" && c.slope > 0) {
+      rejectionReasons.push(
+        `${c.kind}@${c.anchor1.index}-${c.anchor2.index}: slope contradicts direction`
+      );
+      return false;
+    }
+    if (c.anchor1.significance < 25 && c.anchor2.significance < 25) {
       rejectionReasons.push(
         `${c.kind}@${c.anchor1.index}-${c.anchor2.index}: weak anchors`
       );
       return false;
     }
-    if (c.touchCount === 0 && c.span < candles.length * 0.1) {
+    if (c.span < candles.length * MIN_SPAN_RATIO) {
       rejectionReasons.push(
-        `${c.kind}@${c.anchor1.index}-${c.anchor2.index}: short span, no touches`
+        `${c.kind}@${c.anchor1.index}-${c.anchor2.index}: span too short`
+      );
+      return false;
+    }
+    // Require at least one touch besides the 2 anchors for shorter trendlines
+    if (c.touchCount < 0.5 && c.span < candles.length * 0.25) {
+      rejectionReasons.push(
+        `${c.kind}@${c.anchor1.index}-${c.anchor2.index}: no confirming touches`
+      );
+      return false;
+    }
+    // Minimum score threshold
+    if (c.score < MIN_SCORE) {
+      rejectionReasons.push(
+        `${c.kind}@${c.anchor1.index}-${c.anchor2.index}: score ${c.score} < ${MIN_SCORE}`
       );
       return false;
     }
@@ -436,9 +531,13 @@ export function buildTrendlinesWithDebug(
   // Sort by quality score
   filtered.sort((a, b) => b.score - a.score);
 
+  // De-duplicate near-parallel lines: keep only the highest-scored line
+  // in each cluster of similarly-sloped, similarly-positioned lines
+  const deduped = dedupNearParallel(filtered, atr, candles.length);
+
   // Select best lines: prefer active over broken
-  const activeLines = filtered.filter(c => c.active);
-  const brokenLines = filtered.filter(c => c.broken);
+  const activeLines = deduped.filter(c => c.active);
+  const brokenLines = deduped.filter(c => c.broken);
   const selectedCandidates = [
     ...activeLines.slice(0, MAX_OUTPUT_LINES),
     ...brokenLines.slice(0, Math.max(0, MAX_OUTPUT_LINES - activeLines.length)),

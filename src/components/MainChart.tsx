@@ -10,13 +10,19 @@ import {
   type ISeriesApi,
   type IPriceLine,
 } from "lightweight-charts";
-import type { CandleMap, MarketScenario, Timeframe } from "../types";
+import type { CandleMap, MarketScenario, Timeframe, Trendline } from "../types";
 import { buildTrendlines } from "../engine/trendlines";
+import { fetchAITrendlines, getCachedAITrendlines, clearAITrendlineCache } from "../engine/gemini";
+import i18n from "../i18n";
 
 type Props = {
   candleMap: CandleMap;
   scenario: MarketScenario;
   theme?: "dark" | "light";
+  engineConfig?: { minSwingDistance: number; minPriceSeparationPct: number };
+  geminiApiKey?: string;
+  groqApiKey?: string;
+  symbol?: string;
 };
 
 const TIMEFRAMES: Timeframe[] = ["15M", "1H", "2H", "4H", "6H", "8H", "12H", "1D", "1W"];
@@ -60,7 +66,7 @@ function extrapolatePriceByTime(
   return p1 + ((p2 - p1) / (t2 - t1)) * (targetTime - t1);
 }
 
-export default function MainChart({ candleMap, scenario, theme = "dark" }: Props) {
+export default function MainChart({ candleMap, scenario, theme = "dark", engineConfig, geminiApiKey = "", groqApiKey = "", symbol = "" }: Props) {
   const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -72,6 +78,10 @@ export default function MainChart({ candleMap, scenario, theme = "dark" }: Props
   const [selectedTf, setSelectedTf] = useState<Timeframe>("1H");
   const [showTrendlines, setShowTrendlines] = useState(true);
   const [showExplanation, setShowExplanation] = useState(true);
+  const [trendSource, setTrendSource] = useState<"engine" | "ai">("engine");
+  const [aiTrendlines, setAiTrendlines] = useState<Trendline[]>(() => getCachedAITrendlines()?.trendlines ?? []);
+  const [aiTrendLoading, setAiTrendLoading] = useState(false);
+  const [aiTrendError, setAiTrendError] = useState<string | null>(null);
   const [labelY, setLabelY] = useState<{ target: number | null; long: number | null; short: number | null }>({
     target: null,
     long: null,
@@ -79,15 +89,48 @@ export default function MainChart({ candleMap, scenario, theme = "dark" }: Props
   });
   const selectedCandles = useMemo(() => candleMap[selectedTf] ?? [], [candleMap, selectedTf]);
   const lastSelectedCandle = selectedCandles[selectedCandles.length - 1];
-  const activeChartTrendlines = useMemo(
-    () => buildTrendlines(selectedCandles, selectedTf).filter((trendline) => trendline.active).slice(0, 5),
-    [selectedCandles, selectedTf],
+  const engineTrendlines = useMemo(
+    () => buildTrendlines(selectedCandles, selectedTf, engineConfig ? {
+      minSwingDistance: engineConfig.minSwingDistance,
+      minPriceSeparationPct: engineConfig.minPriceSeparationPct / 100,
+    } : undefined).filter((trendline) => trendline.active).slice(0, 3),
+    [selectedCandles, selectedTf, engineConfig],
   );
+  const activeChartTrendlines = trendSource === "ai" && aiTrendlines.length > 0 ? aiTrendlines : engineTrendlines;
+
+  const hasAnyAIKey = !!(geminiApiKey || groqApiKey);
+
+  const handleFetchAITrend = useCallback(async () => {
+    if (!hasAnyAIKey || selectedCandles.length < 20) return;
+    setAiTrendLoading(true);
+    setAiTrendError(null);
+    try {
+      const result = await fetchAITrendlines(
+        geminiApiKey, symbol as import("../types").Symbol, selectedCandles,
+        selectedTf, i18n.language, groqApiKey,
+      );
+      setAiTrendlines(result.trendlines);
+      setTrendSource("ai");
+    } catch (err) {
+      setAiTrendError(err instanceof Error ? err.message : "AI error");
+    } finally {
+      setAiTrendLoading(false);
+    }
+  }, [hasAnyAIKey, geminiApiKey, groqApiKey, symbol, selectedCandles, selectedTf]);
+
+  // Reset AI trendlines when timeframe changes
+  useEffect(() => {
+    clearAITrendlineCache();
+    setAiTrendlines([]);
+    setTrendSource("engine");
+    setAiTrendError(null);
+  }, [selectedTf, symbol]);
 
   const formatLastCandleTime = (time?: number) => {
     if (!time) return "n/a";
+    const locale = i18n.language === "vi" ? "vi-VN" : "en-US";
     try {
-      return new Date(time * 1000).toLocaleString("vi-VN", {
+      return new Date(time * 1000).toLocaleString(locale, {
         hour: "2-digit",
         minute: "2-digit",
         second: "2-digit",
@@ -132,7 +175,7 @@ export default function MainChart({ candleMap, scenario, theme = "dark" }: Props
       },
       watermark: {
         visible: true,
-        text: "Crypto and Forex Trading",
+        text: "Crypto & Forex Trading",
         color: c.watermark,
         fontSize: 24,
       },
@@ -168,6 +211,11 @@ export default function MainChart({ candleMap, scenario, theme = "dark" }: Props
       annotationKeyRef.current = "";
     };
   }, [theme]);
+
+  // Update watermark text when language changes
+  useEffect(() => {
+    chartRef.current?.applyOptions({ watermark: { text: t("chart.watermark") } });
+  }, [t]);
 
   // ── Update candle data, price lines & trendlines ────────────────────────────
   const updateChart = useCallback(() => {
@@ -256,14 +304,14 @@ export default function MainChart({ candleMap, scenario, theme = "dark" }: Props
     trendlineSeriesRef.current = [];
 
     // ── Add level price lines ──────────────────────────────────────
-    const levels: { price: number; color: string; title: string; style: LineStyle }[] = [
-      { price: scenario.pendingLong, color: UP_COLOR, title: "Lệnh Chờ Long", style: LineStyle.Solid },
-      { price: scenario.pendingShort, color: DN_COLOR, title: "Lệnh Chờ Short", style: LineStyle.Solid },
-      { price: scenario.targetPrice, color: "#ffd600", title: "Target", style: LineStyle.Solid },
-      { price: scenario.pivot, color: "#00e5ff", title: "Pivot", style: LineStyle.Dashed },
-      { price: scenario.invalidationLevel, color: "#ff6d00", title: "Invalidation", style: LineStyle.Dotted },
-      { price: scenario.r1, color: "rgba(239,83,80,0.5)", title: "R1", style: LineStyle.Dotted },
-      { price: scenario.s1, color: "rgba(38,166,154,0.5)", title: "S1", style: LineStyle.Dotted },
+    const levels: { price: number; color: string; title: string; style: LineStyle; lineWidth: 1 | 2 }[] = [
+      { price: scenario.pendingLong, color: UP_COLOR, title: t("chart.priceLong"), style: LineStyle.Solid, lineWidth: 1 },
+      { price: scenario.pendingShort, color: DN_COLOR, title: t("chart.priceShort"), style: LineStyle.Solid, lineWidth: 1 },
+      { price: scenario.targetPrice, color: "#ffd600", title: t("chart.priceTarget"), style: LineStyle.Solid, lineWidth: 2 },
+      { price: scenario.pivot, color: "#00e5ff", title: t("chart.pricePivot"), style: LineStyle.Dashed, lineWidth: 2 },
+      { price: scenario.invalidationLevel, color: "#ff6d00", title: t("chart.priceInvalidation"), style: LineStyle.Dotted, lineWidth: 1 },
+      { price: scenario.r1, color: "rgba(239,83,80,0.5)", title: "R1", style: LineStyle.Dotted, lineWidth: 1 },
+      { price: scenario.s1, color: "rgba(38,166,154,0.5)", title: "S1", style: LineStyle.Dotted, lineWidth: 1 },
     ];
 
     for (const lv of levels) {
@@ -271,7 +319,7 @@ export default function MainChart({ candleMap, scenario, theme = "dark" }: Props
         const pl = series.createPriceLine({
           price: lv.price,
           color: lv.color,
-          lineWidth: lv.title === "Pivot" || lv.title === "Target" ? 2 : 1,
+          lineWidth: lv.lineWidth,
           lineStyle: lv.style,
           axisLabelVisible: true,
           title: lv.title,
@@ -305,10 +353,18 @@ export default function MainChart({ candleMap, scenario, theme = "dark" }: Props
         if (!anchor1 || !anchor2 || anchor2.time <= anchor1.time) continue;
 
         const startTime = Math.max(anchor1.time, candles[0]?.time ?? anchor1.time);
-        const endTime = candles[candles.length - 1]?.time ?? anchor2.time;
+        // Limit extension beyond anchor2 to at most the span of the trendline
+        const span = anchor2.time - anchor1.time;
+        const maxExtension = span * 1.0; // extend at most 1x the span beyond anchor2
+        const lastCandleTime = candles[candles.length - 1]?.time ?? anchor2.time;
+        const endTime = Math.min(lastCandleTime, anchor2.time + maxExtension);
         if (endTime <= startTime) continue;
 
-        const lineColor = t.kind === "ascending" ? "#26a69a" : "#ef5350";
+        // Opacity based on trendline quality
+        const alpha = t.strength >= 60 ? 1.0 : t.strength >= 40 ? 0.8 : 0.6;
+        const lineColor = t.kind === "ascending"
+          ? `rgba(38,166,154,${alpha})`
+          : `rgba(239,83,80,${alpha})`;
         const lineData = candles
           .filter((c) => c.time >= startTime && c.time <= endTime)
           .map((c) => ({
@@ -319,7 +375,7 @@ export default function MainChart({ candleMap, scenario, theme = "dark" }: Props
         if (lineData.length >= 2) {
           const lineSeries = chart.addLineSeries({
             color: lineColor,
-            lineWidth: 2,
+            lineWidth: t.strength >= 50 ? 2 : 1,
             lineStyle: t.broken ? LineStyle.Dashed : LineStyle.Solid,
             crosshairMarkerVisible: false,
             lastValueVisible: false,
@@ -336,7 +392,7 @@ export default function MainChart({ candleMap, scenario, theme = "dark" }: Props
       long: series.priceToCoordinate(scenario.pendingLong),
       short: series.priceToCoordinate(scenario.pendingShort),
     });
-  }, [activeChartTrendlines, candleMap, selectedTf, scenario, showTrendlines]);
+  }, [activeChartTrendlines, candleMap, selectedTf, scenario, showTrendlines, t]);
 
   useEffect(() => {
     updateChart();
@@ -368,6 +424,16 @@ export default function MainChart({ candleMap, scenario, theme = "dark" }: Props
         >
           ↗
         </button>
+        {hasAnyAIKey && showTrendlines && (
+          <button
+            className={`chart-toggle-btn ${trendSource === "ai" ? "active" : ""}`}
+            onClick={trendSource === "ai" ? () => setTrendSource("engine") : handleFetchAITrend}
+            disabled={aiTrendLoading}
+            title={trendSource === "ai" ? t("chart.useEngineTrend") : t("chart.useAITrend")}
+          >
+            {aiTrendLoading ? "⏳" : "🤖"}
+          </button>
+        )}
         <button
           className={`chart-toggle-btn ${showExplanation ? "active" : ""}`}
           onClick={() => setShowExplanation(!showExplanation)}
@@ -386,10 +452,12 @@ export default function MainChart({ candleMap, scenario, theme = "dark" }: Props
       </div>
 
       <div className="chart-status-strip">
-        <span>TF: {selectedTf}</span>
-        <span>Candles: {selectedCandles.length}</span>
-        <span>Last candle: {formatLastCandleTime(lastSelectedCandle?.time)}</span>
-        <span>Close: {lastSelectedCandle?.close?.toFixed(2) ?? "n/a"}</span>
+        <span>{t("chart.statusTF")} {selectedTf}</span>
+        <span>{t("chart.statusCandles")} {selectedCandles.length}</span>
+        <span>{t("chart.statusLastCandle")} {formatLastCandleTime(lastSelectedCandle?.time)}</span>
+        <span>{t("chart.statusClose")} {lastSelectedCandle?.close?.toFixed(2) ?? "n/a"}</span>
+        {trendSource === "ai" && <span style={{ color: "#00e5ff" }}>🤖 AI Trendlines</span>}
+        {aiTrendError && <span style={{ color: "#ef5350", fontSize: 10 }}>{aiTrendError}</span>}
       </div>
 
       {/* ── Interactive chart ───────────────────────────────────────── */}
@@ -397,15 +465,15 @@ export default function MainChart({ candleMap, scenario, theme = "dark" }: Props
         <div ref={containerRef} className="lw-chart-container" />
         <div className="chart-labels" aria-hidden="true">
           <div className="price-label target" style={{ top: labelY.target ?? 120 }}>
-            <span className="label-title">Giá Thị Trường Sẽ Hướng Tới</span>
+            <span className="label-title">{t("chart.labelTarget")}</span>
             <span className="label-price">{scenario.targetPrice.toFixed(2)}</span>
           </div>
           <div className="price-label short" style={{ top: labelY.short ?? 170 }}>
-            <span className="label-title">Đặt Lệnh Chờ Tự Động Short</span>
+            <span className="label-title">{t("chart.labelShort")}</span>
             <span className="label-price">{scenario.pendingShort.toFixed(2)}</span>
           </div>
           <div className="price-label long" style={{ top: labelY.long ?? 220 }}>
-            <span className="label-title">Đặt Lệnh Chờ Tự Động Long</span>
+            <span className="label-title">{t("chart.labelLong")}</span>
             <span className="label-price">{scenario.pendingLong.toFixed(2)}</span>
           </div>
         </div>

@@ -141,7 +141,7 @@ function makeNeutralTrendContext(): TrendContext {
 describe("scoreTimeframe", () => {
   it("returns a valid TimeframeSignal with bullish/bearish scores summing to 100", () => {
     const candles = makeCandles(100);
-    const signal = scoreTimeframe("1H", candles);
+    const signal = scoreTimeframe("1H", candles)!;
 
     expect(signal.timeframe).toBe("1H");
     expect(signal.bullishScore + signal.bearishScore).toBe(100);
@@ -152,23 +152,23 @@ describe("scoreTimeframe", () => {
 
   it("applies HTF context — bullish parent should increase bullish score", () => {
     const candles = makeCandles(100);
-    const withoutHTF = scoreTimeframe("1H", candles);
+    const withoutHTF = scoreTimeframe("1H", candles)!;
 
     const htfContext: HTFContext = { htfScores: { "4H": 85 } };
-    const withHTF = scoreTimeframe("1H", candles, htfContext);
+    const withHTF = scoreTimeframe("1H", candles, htfContext)!;
 
     expect(withHTF.bullishScore).toBeGreaterThanOrEqual(withoutHTF.bullishScore - 5);
   });
 
   it("uses 1W as HTF parent for 1D scoring", () => {
     const candles = makeCandles(100);
-    const withoutHTF = scoreTimeframe("1D", candles);
+    const withoutHTF = scoreTimeframe("1D", candles)!;
 
     const bullishWeekly: HTFContext = { htfScores: { "1W": 88 } };
     const bearishWeekly: HTFContext = { htfScores: { "1W": 12 } };
 
-    const withBullishWeekly = scoreTimeframe("1D", candles, bullishWeekly);
-    const withBearishWeekly = scoreTimeframe("1D", candles, bearishWeekly);
+    const withBullishWeekly = scoreTimeframe("1D", candles, bullishWeekly)!;
+    const withBearishWeekly = scoreTimeframe("1D", candles, bearishWeekly)!;
 
     expect(withBullishWeekly.bullishScore).toBeGreaterThanOrEqual(withoutHTF.bullishScore);
     expect(withBearishWeekly.bullishScore).toBeLessThanOrEqual(withoutHTF.bullishScore);
@@ -176,11 +176,39 @@ describe("scoreTimeframe", () => {
 
   it("produces swing-based bullish/bearish levels", () => {
     const candles = makeCandles(50000);
-    const signal = scoreTimeframe("4H", candles);
+    const signal = scoreTimeframe("4H", candles)!;
 
     expect(signal.bullishLevel).toBeGreaterThan(0);
     expect(signal.bearishLevel).toBeGreaterThan(0);
     expect(signal.bullishLevel).not.toBe(signal.bearishLevel);
+  });
+});
+
+describe("buildScenario locked entry", () => {
+  it("locks pending entry after activation and does not recalculate it", () => {
+    const candleMap = makeTrendCandleMap("up", 1000);
+    const signals: TimeframeSignal[] = [
+      makeSignal("1H", 80, "bullish"),
+      makeSignal("4H", 75, "bullish"),
+      makeSignal("1D", 70, "bullish"),
+    ];
+    const marketBias: MarketBias = computeBias(signals);
+    const trendlines = buildTrendlines(candleMap["1H"]);
+    const trendContext = makeNeutralTrendContext();
+
+    const locked = { side: "long" as const, entry: 1050, invalidation: 1000 };
+    const scenario = buildScenario({
+      candleMap,
+      timeframeSignals: signals,
+      marketBias,
+      chartTrendlines: trendlines,
+      trendContext,
+      symbol: "BTC/USDT",
+      lockedEntry: locked,
+    });
+
+    expect(scenario.pendingLong).toBe(1050);
+    expect(scenario.status).toBe("active_long");
   });
 });
 
@@ -603,7 +631,7 @@ describe("trendline generation", () => {
     const candles = makeCandles(100, 150, 0.04);
     const trendlines = buildTrendlines(candles);
 
-    expect(trendlines.length).toBeLessThanOrEqual(8);
+    expect(trendlines.length).toBeLessThanOrEqual(6);
   });
 
   it("returns empty for insufficient candles", () => {
@@ -822,7 +850,7 @@ describe("score-config", () => {
 describe("score breakdown", () => {
   it("scoreTimeframe returns a ScoreBreakdown with all 10 components", () => {
     const candles = makeCandles(100, 40, 0.03);
-    const signal = scoreTimeframe("1H", candles);
+    const signal = scoreTimeframe("1H", candles)!;
 
     expect(signal.scoreBreakdown).toBeDefined();
     const bd = signal.scoreBreakdown!;
@@ -843,8 +871,8 @@ describe("score breakdown", () => {
 
   it("breakdown is consistent across calls with same input", () => {
     const candles = makeCandles(100, 40, 0.03);
-    const s1 = scoreTimeframe("4H", candles);
-    const s2 = scoreTimeframe("4H", candles);
+    const s1 = scoreTimeframe("4H", candles)!;
+    const s2 = scoreTimeframe("4H", candles)!;
 
     expect(s1.scoreBreakdown).toEqual(s2.scoreBreakdown);
   });
@@ -854,7 +882,7 @@ describe("score breakdown", () => {
       ...candle,
       volume: index === list.length - 1 ? 4200 : 1700 + index * 8,
     }));
-    const signal = scoreTimeframe("1H", candles);
+    const signal = scoreTimeframe("1H", candles)!;
 
     expect(signal.volumeMetrics).toBeDefined();
     expect(signal.volumeMetrics!.volumeRatio).toBeGreaterThan(1);
@@ -1202,7 +1230,7 @@ describe("invariants", () => {
     ];
 
     for (const candles of scenarios) {
-      const signal = scoreTimeframe("1H", candles);
+      const signal = scoreTimeframe("1H", candles)!;
       expect(signal.bullishScore + signal.bearishScore).toBe(100);
     }
   });
@@ -1299,7 +1327,7 @@ describe("invariants", () => {
     const tfs: Timeframe[] = ["15M", "1H", "2H", "4H", "6H", "8H", "12H", "1D"];
 
     for (const tf of tfs) {
-      const signal = scoreTimeframe(tf, candles);
+      const signal = scoreTimeframe(tf, candles)!;
       expect(signal.scoreBreakdown).toBeDefined();
       expect(signal.scoreBreakdown!.total).toBe(signal.bullishScore);
     }
@@ -1898,7 +1926,7 @@ describe("Trend pressure enrichment", () => {
 describe("Level selection metadata in scoring", () => {
   it("scoreTimeframe returns bullishLevelMeta and bearishLevelMeta", () => {
     const candles = makeUptrend(100, 60);
-    const signal = scoreTimeframe("4H", candles);
+    const signal = scoreTimeframe("4H", candles)!;
     expect(signal.bullishLevelMeta).toBeDefined();
     expect(signal.bearishLevelMeta).toBeDefined();
     expect(signal.bullishLevelMeta!.selectedFrom).toBeDefined();
@@ -1908,7 +1936,7 @@ describe("Level selection metadata in scoring", () => {
 
   it("levelQuality is higher for swing-TF source than pivot-TF fallback", () => {
     const candles = makeUptrend(100, 60);
-    const signal = scoreTimeframe("1H", candles);
+    const signal = scoreTimeframe("1H", candles)!;
     if (signal.bullishLevelMeta?.selectedFrom === "swing-1H") {
       expect(signal.bullishLevelMeta.levelQuality).toBeGreaterThanOrEqual(50);
     }

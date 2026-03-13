@@ -47,7 +47,8 @@
   "tabs": {
     "signals": "Live Signals",
     "analysis": "Market Analysis",
-    "trendlines": "Trendlines"
+    "trendlines": "Trendlines",
+    "entries": "Entries"
   },
   "signals": {
     "longEntry": "↑ Pending Long Order",
@@ -85,7 +86,13 @@
     "bearish": "Bearish",
     "neutral": "Neutral",
     "hasTarget": "Has Price Target",
-    "secondaryOnly": "This panel is secondary context only. If live news is unavailable, the engine continues without using articles to generate signals."
+    "secondaryOnly": "This panel is secondary context only. If live news is unavailable, the engine continues without using articles to generate signals.",
+    "filterAll": "All",
+    "filterLive": "Live",
+    "filterBullish": "Bullish",
+    "filterBearish": "Bearish",
+    "details": "Details",
+    "noNews": "No news articles available."
   },
   "loading": {
     "market": "Loading market data…",
@@ -126,10 +133,25 @@
   },
   "chart": {
     "showTrendlines": "Trendlines",
+    "useAITrend": "Use AI trendlines",
+    "useEngineTrend": "Switch to engine trendlines",
     "showExplanation": "Explanation",
     "zoomIn": "Zoom In",
     "zoomOut": "Zoom Out",
-    "resetZoom": "Reset"
+    "resetZoom": "Reset",
+    "watermark": "Crypto and Forex Trading",
+    "statusTF": "TF:",
+    "statusCandles": "Candles:",
+    "statusLastCandle": "Last candle:",
+    "statusClose": "Close:",
+    "labelTarget": "Market Target Price",
+    "labelShort": "Auto Pending Short",
+    "labelLong": "Auto Pending Long",
+    "priceLong": "Pending Long",
+    "priceShort": "Pending Short",
+    "priceTarget": "Target",
+    "pricePivot": "Pivot",
+    "priceInvalidation": "Invalidation"
   },
   "scenario": {
     "biasUp": "BULLISH",
@@ -178,6 +200,51 @@
     "cautionMixed": "⚠ Mixed trend across timeframes — confidence reduced",
     "cautionLongHtf": "HTF bearish — long scenario is tactical only",
     "cautionShortHtf": "HTF bullish — short scenario is tactical only",
-    "cautionQuality": "⚠ Low quality setup: {{reason}}"
+    "cautionQuality": "⚠ Low quality setup: {{reason}}",
+    "rejectRR": "R:R too low ({{rr}} < {{min}})",
+    "rejectConfluence": "Insufficient confluence ({{count}} < {{min}})",
+    "rejectQuality": "Low setup quality ({{score}} < {{min}})",
+    "rejectStructure": "Weak S/R structure at entry ({{score}} < {{min}})"
+  },
+  "debug": {
+    "title": "Engine Debug",
+    "alignment": "Alignment",
+    "htfAgreement": "HTF agreement",
+    "pressure": "Pressure",
+    "completeness": "Completeness",
+    "conflictFlags": "Conflict flags:",
+    "missingTF": "Missing TF:",
+    "pressureReason": "Pressure reason:",
+    "layerShort": "Short 1H",
+    "layerMedium": "Medium 4H",
+    "layerHTF": "HTF 12H/1D/1W",
+    "dir": "dir",
+    "strength": "strength",
+    "structure": "structure",
+    "ema": "ema",
+    "trendline": "trendline",
+    "pressureLabel": "pressure"
+  },
+  "bias_reason": {
+    "confidenceLow": "confidence too low ({{value}}%)",
+    "nearEqual": "bullish/bearish nearly equal ({{bull}}/{{bear}})",
+    "ltfHtfConflict": "LTF/HTF conflict high ({{level}}) + mixed trend",
+    "neutralZone": "bullish/bearish in neutral zone"
+  },
+  "ai": {
+    "ask": "Ask AI",
+    "loading": "Analyzing…",
+    "placeholder": "Press \"Ask AI\" to get Gemini analysis of current market data.",
+    "noKey": "Add an AI API key (Gemini or Groq) in Settings first."
+  },
+  "settings": {
+    "title": "Settings",
+    "theme": "Theme",
+    "dark": "Dark",
+    "light": "Light",
+    "language": "Language",
+    "alerts": "Price Alerts",
+    "geminiKey": "API Key",
+    "geminiHint": "Gemini: aistudio.google.com | Groq: console.groq.com — both free. Keys stored locally only."
   }
 }

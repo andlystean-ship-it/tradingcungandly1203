@@ -6,6 +6,7 @@
 
 import type { SourceMode } from "../types";
 import { useTranslation } from "react-i18next";
+import i18n from "../i18n";
 
 type Props = {
   source: "live" | "stale" | "error" | "partial";
@@ -18,8 +19,9 @@ type Props = {
 };
 
 function formatTime(iso: string): string {
+  const locale = i18n.language === "vi" ? "vi-VN" : "en-US";
   try {
-    return new Date(iso).toLocaleTimeString("vi-VN", {
+    return new Date(iso).toLocaleTimeString(locale, {
       hour: "2-digit",
       minute: "2-digit",
       second: "2-digit",

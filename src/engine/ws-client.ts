@@ -12,7 +12,7 @@
 
 import type { CandleData, Symbol, Timeframe } from "../types";
 
-const BINANCE_WS = "wss://stream.binance.com:9443/ws";
+const BINANCE_WS = "wss://fstream.binance.com/ws";
 
 // Map our symbol names to Binance stream symbols
 const SYMBOL_MAP: Record<Symbol, string> = {

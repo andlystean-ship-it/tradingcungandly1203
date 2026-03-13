@@ -47,7 +47,8 @@
   "tabs": {
     "signals": "Tín hiệu Live",
     "analysis": "Phân tích thị trường",
-    "trendlines": "Đường xu hướng"
+    "trendlines": "Đường xu hướng",
+    "entries": "Entry"
   },
   "signals": {
     "longEntry": "↑ Đặt Lệnh Chờ Long",
@@ -85,7 +86,13 @@
     "bearish": "Tiêu cực",
     "neutral": "Trung tính",
     "hasTarget": "Có Mục Tiêu Giá",
-    "secondaryOnly": "Khung này chỉ là ngữ cảnh phụ. Khi feed live không sẵn có, engine vẫn chạy mà không dùng tin tức để tạo tín hiệu."
+    "secondaryOnly": "Khung này chỉ là ngữ cảnh phụ. Khi feed live không sẵn có, engine vẫn chạy mà không dùng tin tức để tạo tín hiệu.",
+    "filterAll": "Tất cả",
+    "filterLive": "Live",
+    "filterBullish": "Tích cực",
+    "filterBearish": "Tiêu cực",
+    "details": "Chi tiết",
+    "noNews": "Chưa có tin tức nào."
   },
   "loading": {
     "market": "Đang tải dữ liệu thị trường…",
@@ -126,10 +133,25 @@
   },
   "chart": {
     "showTrendlines": "Trendlines",
+    "useAITrend": "Dùng AI vẽ trendline",
+    "useEngineTrend": "Quay lại trendline engine",
     "showExplanation": "Giải thích",
     "zoomIn": "Phóng to",
     "zoomOut": "Thu nhỏ",
-    "resetZoom": "Reset"
+    "resetZoom": "Reset",
+    "watermark": "Crypto and Forex Trading",
+    "statusTF": "TF:",
+    "statusCandles": "Candles:",
+    "statusLastCandle": "Nến cuối:",
+    "statusClose": "Close:",
+    "labelTarget": "Giá Thị Trường Sẽ Hướng Tới",
+    "labelShort": "Đặt Lệnh Chờ Tự Động Short",
+    "labelLong": "Đặt Lệnh Chờ Tự Động Long",
+    "priceLong": "Lệnh Chờ Long",
+    "priceShort": "Lệnh Chờ Short",
+    "priceTarget": "Target",
+    "pricePivot": "Pivot",
+    "priceInvalidation": "Invalidation"
   },
   "scenario": {
     "biasUp": "TĂNG",
@@ -178,6 +200,51 @@
     "cautionMixed": "⚠ Xu hướng trái chiều giữa các khung — confidence giảm",
     "cautionLongHtf": "HTF trend giảm — kịch bản long chỉ mang tính chiến thuật",
     "cautionShortHtf": "HTF trend tăng — kịch bản short chỉ mang tính chiến thuật",
-    "cautionQuality": "⚠ Setup chưa đủ chất lượng: {{reason}}"
+    "cautionQuality": "⚠ Setup chưa đủ chất lượng: {{reason}}",
+    "rejectRR": "R:R quá thấp ({{rr}} < {{min}})",
+    "rejectConfluence": "Chưa đủ confluence ({{count}} < {{min}})",
+    "rejectQuality": "Chất lượng setup thấp ({{score}} < {{min}})",
+    "rejectStructure": "Cấu trúc S/R yếu tại entry ({{score}} < {{min}})"
+  },
+  "debug": {
+    "title": "Engine Debug",
+    "alignment": "Alignment",
+    "htfAgreement": "HTF agreement",
+    "pressure": "Áp lực",
+    "completeness": "Hoàn thiện",
+    "conflictFlags": "Cờ xung đột:",
+    "missingTF": "TF thiếu:",
+    "pressureReason": "Lý do áp lực:",
+    "layerShort": "Ngắn hạn 1H",
+    "layerMedium": "Trung hạn 4H",
+    "layerHTF": "HTF 12H/1D/1W",
+    "dir": "hướng",
+    "strength": "mạnh",
+    "structure": "cấu trúc",
+    "ema": "ema",
+    "trendline": "trendline",
+    "pressureLabel": "áp lực"
+  },
+  "bias_reason": {
+    "confidenceLow": "confidence quá thấp ({{value}}%)",
+    "nearEqual": "bullish/bearish gần bằng nhau ({{bull}}/{{bear}})",
+    "ltfHtfConflict": "LTF/HTF xung đột lớn ({{level}}) + trend trái chiều",
+    "neutralZone": "bullish/bearish trong vùng trung lập"
+  },
+  "ai": {
+    "ask": "Hỏi AI",
+    "loading": "Đang phân tích…",
+    "placeholder": "Nhấn \"Hỏi AI\" để Gemini phân tích dữ liệu thị trường hiện tại.",
+    "noKey": "Thêm API key (Gemini hoặc Groq) trong Cài đặt trước."
+  },
+  "settings": {
+    "title": "Cài đặt",
+    "theme": "Giao diện",
+    "dark": "Tối",
+    "light": "Sáng",
+    "language": "Ngôn ngữ",
+    "alerts": "Cảnh báo giá",
+    "geminiKey": "API Key",
+    "geminiHint": "Gemini: aistudio.google.com | Groq: console.groq.com — đều miễn phí. Key chỉ lưu trên máy bạn."
   }
 }

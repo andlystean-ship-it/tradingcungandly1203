@@ -36,38 +36,43 @@ export default function NewsPanel({ news, symbol }: Props) {
         <div className="news-badge">{t("news.count", { count: visibleNews.length })}</div>
       </div>
 
-      <div className="news-filters" role="tablist" aria-label="News filters">
+      <div className="news-filters" role="tablist" aria-label={t("news.title")}>
         <button
           className={`news-filter ${activeFilter === "all" ? "active" : ""}`}
           onClick={() => setActiveFilter("all")}
           type="button"
         >
-          All
+          {t("news.filterAll")}
         </button>
         <button
           className={`news-filter ${activeFilter === "live" ? "active" : ""}`}
           onClick={() => setActiveFilter("live")}
           type="button"
         >
-          Live
+          {t("news.filterLive")}
         </button>
         <button
           className={`news-filter ${activeFilter === "bullish" ? "active" : ""}`}
           onClick={() => setActiveFilter("bullish")}
           type="button"
         >
-          Bullish
+          {t("news.filterBullish")}
         </button>
         <button
           className={`news-filter ${activeFilter === "bearish" ? "active" : ""}`}
           onClick={() => setActiveFilter("bearish")}
           type="button"
         >
-          Bearish
+          {t("news.filterBearish")}
         </button>
       </div>
 
       <div className="news-list">
+        {visibleNews.length === 0 && (
+          <div style={{ color: "var(--text-muted)", fontSize: 12, padding: "16px 0", textAlign: "center" }}>
+            {t("news.noNews")}
+          </div>
+        )}
         {visibleNews.map((item) => (
           <div key={item.id} className="news-card">
             <div className="news-meta">
@@ -96,7 +101,7 @@ export default function NewsPanel({ news, symbol }: Props) {
                 {item.sourceMode !== "fallback" && item.hasTargetPrice && (
                   <button className="news-cta">{t("news.hasTarget")}</button>
                 )}
-                <button className="news-cta ghost" type="button">Details</button>
+                <button className="news-cta ghost" type="button">{t("news.details")}</button>
               </div>
             </div>
             {item.sourceMode === "fallback" && (

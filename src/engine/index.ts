@@ -49,6 +49,12 @@ export function getChartCandles(symbol: Symbol, count = 80): CandleData[] {
 const HTF_SET = new Set<Timeframe>(["4H", "6H", "8H", "12H", "1D", "1W"]);
 
 // ── Shared engine pipeline (symbol-agnostic) ──────────────────────────────────
+type LockedEntry = {
+  side: "long" | "short";
+  entry: number;
+  invalidation: number;
+};
+
 function runPipeline(
   symbol: Symbol,
   candleMap: CandleMap,
@@ -62,6 +68,7 @@ function runPipeline(
   missingTimeframes?: Timeframe[],
   timeframeCompleteness?: number,
   engineConfig?: EngineConfig,
+  lockedEntry?: LockedEntry,
 ): EngineOutput {
   const now = new Date().toISOString();
 
@@ -108,6 +115,7 @@ function runPipeline(
     const tfCandles = candleMap[tf];
     if (!tfCandles || tfCandles.length < 3) continue; // skip missing TFs
     const signal = scoreTimeframe(tf, tfCandles);
+    if (!signal) continue;
     htfSignals.push(signal);
     htfScores[tf] = signal.bullishScore;
   }
@@ -121,6 +129,7 @@ function runPipeline(
     const tfCandles = candleMap[tf];
     if (!tfCandles || tfCandles.length < 3) continue; // skip missing TFs
     const signal = scoreTimeframe(tf, tfCandles, htfContext);
+    if (!signal) continue;
     ltfSignals.push(signal);
   }
 
@@ -139,7 +148,10 @@ function runPipeline(
     trendContext,
     symbol,
   };
-  const marketScenario = buildScenario(scenarioInput);
+  const marketScenario = buildScenario({
+    ...scenarioInput,
+    lockedEntry,
+  });
 
   const dataStatus: DataStatus = {
     isStale: false,
@@ -183,7 +195,11 @@ export function runEngine(symbol: Symbol): EngineOutput {
 }
 
 // ── Async engine (real Binance candles) ────────────────────────────────────────
-export async function runEngineAsync(symbol: Symbol, config?: EngineConfig): Promise<EngineOutput> {
+export async function runEngineAsync(
+  symbol: Symbol,
+  config?: EngineConfig,
+  lockedEntry?: LockedEntry,
+): Promise<EngineOutput> {
   try {
     const {
       candleMap, source, sourceMode, warning, perTimeframe,
@@ -193,7 +209,7 @@ export async function runEngineAsync(symbol: Symbol, config?: EngineConfig): Pro
     return runPipeline(
       symbol, candleMap, source, sourceMode, warning, perTimeframe,
       liveTfCount, totalTfCount, providerInfo,
-      missingTimeframes, timeframeCompleteness, config,
+      missingTimeframes, timeframeCompleteness, config, lockedEntry,
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -213,6 +229,7 @@ export async function runEngineAsync(symbol: Symbol, config?: EngineConfig): Pro
       undefined,
       0,
       config,
+      lockedEntry,
     );
   }
 }
