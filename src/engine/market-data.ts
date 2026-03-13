@@ -28,6 +28,7 @@ const BINANCE_BASE = import.meta.env?.DEV
   ? "/api/binance/api/v3"
   : "https://api.binance.com/api/v3";
 const FETCH_TIMEOUT_MS = 8000;
+const BINANCE_MAX_KLINES_PER_REQUEST = 1500;
 
 // ── Symbol → Binance pair ─────────────────────────────────────────────────────
 // XAU uses PAXGUSDT (Pax Gold, 1:1 gold-backed token on Binance spot).
@@ -155,18 +156,52 @@ export async function fetchBinanceCandles(
 ): Promise<CandleData[]> {
   const pair = toBinancePair(symbol);
   const interval = BINANCE_INTERVAL[timeframe];
-  const url = `${BINANCE_BASE}/klines?symbol=${pair}&interval=${interval}&limit=${count}`;
-
-  const res = await fetchWithTimeout(url, FETCH_TIMEOUT_MS);
-  if (!res.ok) {
-    throw new Error(`Binance ${pair}/${interval}: HTTP ${res.status}`);
+  if (count <= BINANCE_MAX_KLINES_PER_REQUEST) {
+    const url = `${BINANCE_BASE}/klines?symbol=${pair}&interval=${interval}&limit=${count}`;
+    const res = await fetchWithTimeout(url, FETCH_TIMEOUT_MS);
+    if (!res.ok) {
+      throw new Error(`Binance ${pair}/${interval}: HTTP ${res.status}`);
+    }
+    const rows: BinanceKline[] = await res.json();
+    const candles = parseKlines(rows);
+    if (candles.length < 2) {
+      throw new Error(`Binance ${pair}/${interval}: insufficient candle data`);
+    }
+    return candles;
   }
-  const rows: BinanceKline[] = await res.json();
-  const candles = parseKlines(rows);
-  if (candles.length < 2) {
+
+  let remaining = count;
+  let endTimeMs: number | null = null;
+  const segments: CandleData[][] = [];
+
+  while (remaining > 0) {
+    const limit = Math.min(remaining, BINANCE_MAX_KLINES_PER_REQUEST);
+    const endTimeParam = endTimeMs != null ? `&endTime=${endTimeMs}` : "";
+    const url = `${BINANCE_BASE}/klines?symbol=${pair}&interval=${interval}&limit=${limit}${endTimeParam}`;
+
+    const res = await fetchWithTimeout(url, FETCH_TIMEOUT_MS);
+    if (!res.ok) {
+      throw new Error(`Binance ${pair}/${interval}: HTTP ${res.status}`);
+    }
+
+    const rows: BinanceKline[] = await res.json();
+    if (!rows.length) break;
+
+    const candles = parseKlines(rows);
+    segments.unshift(candles);
+    remaining -= candles.length;
+
+    // Next page: fetch candles older than the first candle in this batch.
+    endTimeMs = rows[0][0] - 1;
+
+    if (rows.length < limit) break;
+  }
+
+  const merged = segments.flat();
+  if (merged.length < 2) {
     throw new Error(`Binance ${pair}/${interval}: insufficient candle data`);
   }
-  return candles;
+  return merged.slice(-count);
 }
 
 export type FetchResult = {

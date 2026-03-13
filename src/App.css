@@ -1395,23 +1395,55 @@ html, body, #root {
 }
 
 /* ── SIGNAL HISTORY ── */
+.signal-history-panel {
+  margin-top: 8px;
+  padding: 8px 12px 10px;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border-dim);
+  border-bottom: 1px solid var(--border-dim);
+  position: relative;
+  z-index: 2;
+  isolation: isolate;
+  overflow: hidden;
+}
+
+.signal-history-header {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  font-weight: 700;
+  color: var(--neon-cyan);
+  margin-bottom: 8px;
+}
+
 .signal-history {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  margin-top: 8px;
 }
 
 .signal-history-item {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: 60px 1fr 1fr 46px;
+  column-gap: 8px;
   align-items: center;
   padding: 6px 8px;
-  background: var(--bg-card);
+  background: #090f1a;
   border-radius: 4px;
   border: 1px solid var(--border-dim);
   font-size: 10px;
   color: var(--text-muted);
+  min-height: 34px;
+}
+
+.signal-history-cell,
+.signal-history-time {
+  text-align: center;
+  font-family: var(--font-mono);
+}
+
+.signal-history-time {
+  font-size: 9px;
 }
 
 .signal-history-side {

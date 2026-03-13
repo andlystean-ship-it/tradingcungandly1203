@@ -12,13 +12,13 @@ import type { Timeframe } from "../types";
 /** Explicit window sizes for each engine analysis step */
 export const WINDOWS = {
   /** Candles rendered on the visible chart */
-  chartRender: 120,
+  chartRender: 2000,
   /** Candles used for swing / support-resistance / trendline structure detection */
-  structure: 200,
+  structure: 2000,
   /** Candles used for short-term momentum calculations */
   momentum: 14,
   /** Candles used for higher-timeframe trend context layers */
-  htfContext: 100,
+  htfContext: 2000,
 } as const;
 
 /**
@@ -26,13 +26,13 @@ export const WINDOWS = {
  * Must be >= the deepest window that will ever read from that TF.
  */
 export const FETCH_COUNTS: Record<Timeframe, number> = {
-  "15M": 100,
-  "1H":  250,   // structure(200) + lookback margin
-  "2H":  150,
-  "4H":  120,   // HTF context + scoring
-  "6H":  100,
-  "8H":  100,
-  "12H": 100,
-  "1D":  100,
-  "1W":  80,
+  "15M": 2000,
+  "1H": 2000,
+  "2H": 2000,
+  "4H": 2000,
+  "6H": 2000,
+  "8H": 2000,
+  "12H": 2000,
+  "1D": 2000,
+  "1W": 2000,
 };

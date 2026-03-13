@@ -67,6 +67,8 @@ export type WsClientOptions = {
   symbol: Symbol;
   timeframes: Timeframe[];
   onUpdate: (update: CandleUpdate) => void;
+  onOpen?: () => void;
+  onClose?: () => void;
   onError?: (error: string) => void;
   onReconnect?: (attempt: number) => void;
 };
@@ -108,6 +110,7 @@ export class BinanceWsClient {
 
     this.ws.onopen = () => {
       this.reconnectAttempt = 0;
+      this.options.onOpen?.();
     };
 
     this.ws.onmessage = (event) => {
@@ -149,6 +152,7 @@ export class BinanceWsClient {
     };
 
     this.ws.onclose = () => {
+      this.options.onClose?.();
       if (!this.disposed) {
         this.scheduleReconnect();
       }
@@ -193,5 +197,6 @@ export class BinanceWsClient {
       this.ws.close();
       this.ws = null;
     }
+    this.options.onClose?.();
   }
 }

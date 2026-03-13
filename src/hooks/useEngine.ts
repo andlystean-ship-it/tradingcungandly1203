@@ -36,8 +36,10 @@ export type EngineState = {
 
 /** Default refresh interval */
 const DEFAULT_REFRESH_SEC = 3;
+const WS_HEALTHY_REFRESH_FLOOR_MS = 45_000;
 const WS_TRIGGER_TIMEFRAMES: Timeframe[] = ["15M", "1H", "2H", "4H", "6H", "8H", "12H", "1D", "1W"];
 const WS_REFRESH_COOLDOWN_MS = 1200;
+const REALTIME_MAX_CANDLES_PER_TF = 2000;
 
 function mergeRealtimeCandle(
   prev: EngineOutput,
@@ -65,7 +67,7 @@ function mergeRealtimeCandle(
     };
   } else {
     nextTfCandles.push(candle);
-    const maxLen = Math.max(tfCandles.length, 180);
+    const maxLen = Math.max(tfCandles.length, REALTIME_MAX_CANDLES_PER_TF);
     while (nextTfCandles.length > maxLen) {
       nextTfCandles.shift();
     }
@@ -88,7 +90,7 @@ function mergeRealtimeCandle(
   };
 
   if (timeframe === "1H") {
-    const chartLen = prev.chartCandles.length > 0 ? prev.chartCandles.length : 120;
+    const chartLen = prev.chartCandles.length > 0 ? prev.chartCandles.length : REALTIME_MAX_CANDLES_PER_TF;
     next.chartCandles = nextTfCandles.slice(-chartLen);
     next.currentPrice = candle.close;
     next.marketScenario = {
@@ -108,6 +110,11 @@ export function useEngine(symbol: Symbol, config?: EngineConfig): EngineState {
   const [initializing, setInitializing] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isStale, setIsStale] = useState(false);
+  const [wsOnline, setWsOnline] = useState(false);
+
+  const effectiveRefreshInterval = wsOnline
+    ? Math.max(refreshInterval, WS_HEALTHY_REFRESH_FLOOR_MS)
+    : refreshInterval;
 
   const symbolRef = useRef(symbol);
   symbolRef.current = symbol;
@@ -179,7 +186,7 @@ export function useEngine(symbol: Symbol, config?: EngineConfig): EngineState {
       if (timer) clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [symbol, refreshInterval]);
+  }, [symbol, effectiveRefreshInterval]);
 
   useEffect(() => {
     if (typeof WebSocket === "undefined") return;
@@ -187,6 +194,12 @@ export function useEngine(symbol: Symbol, config?: EngineConfig): EngineState {
     const wsClient = new BinanceWsClient({
       symbol,
       timeframes: WS_TRIGGER_TIMEFRAMES,
+      onOpen: () => {
+        setWsOnline(true);
+      },
+      onClose: () => {
+        setWsOnline(false);
+      },
       onUpdate: ({ timeframe, candle, isClosed }) => {
         setOutput((prev) => {
           if (!prev || prev.symbol !== symbol) return prev;
@@ -208,6 +221,7 @@ export function useEngine(symbol: Symbol, config?: EngineConfig): EngineState {
     wsClient.connect();
     return () => {
       wsClient.disconnect();
+      setWsOnline(false);
     };
   }, [symbol, refresh]);
 
