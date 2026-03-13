@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import {
   createChart,
@@ -10,7 +10,8 @@ import {
   type ISeriesApi,
   type IPriceLine,
 } from "lightweight-charts";
-import type { CandleMap, MarketScenario, Trendline, Timeframe } from "../types";
+import type { CandleMap, MarketScenario, Timeframe } from "../types";
+import { buildTrendlines } from "../engine/trendlines";
 
 type Props = {
   candleMap: CandleMap;
@@ -48,10 +49,15 @@ function getChartColors(theme: "dark" | "light") {
   };
 }
 
-/** Extrapolate trendline to a target candle index */
-function extrapolatePrice(t: Trendline, targetIdx: number): number {
-  if (t.x2 === t.x1) return t.y1;
-  return t.y1 + ((t.y2 - t.y1) / (t.x2 - t.x1)) * (targetIdx - t.x1);
+function extrapolatePriceByTime(
+  t1: number,
+  p1: number,
+  t2: number,
+  p2: number,
+  targetTime: number,
+): number {
+  if (t2 === t1) return p1;
+  return p1 + ((p2 - p1) / (t2 - t1)) * (targetTime - t1);
 }
 
 export default function MainChart({ candleMap, scenario, theme = "dark" }: Props) {
@@ -71,8 +77,12 @@ export default function MainChart({ candleMap, scenario, theme = "dark" }: Props
     long: null,
     short: null,
   });
-  const selectedCandles = candleMap[selectedTf] || [];
+  const selectedCandles = useMemo(() => candleMap[selectedTf] ?? [], [candleMap, selectedTf]);
   const lastSelectedCandle = selectedCandles[selectedCandles.length - 1];
+  const activeChartTrendlines = useMemo(
+    () => buildTrendlines(selectedCandles, selectedTf).filter((trendline) => trendline.active).slice(0, 5),
+    [selectedCandles, selectedTf],
+  );
 
   const formatLastCandleTime = (time?: number) => {
     if (!time) return "n/a";
@@ -206,9 +216,7 @@ export default function MainChart({ candleMap, scenario, theme = "dark" }: Props
       .slice(0, 4)
       .map((zone) => `${zone.kind}:${zone.center.toFixed(2)}:${zone.strengthScore}`)
       .join("|");
-    const trendKey = scenario.trendlines
-      .filter((trendline) => trendline.active)
-      .slice(0, 5)
+    const trendKey = activeChartTrendlines
       .map((trendline) => `${trendline.id}:${trendline.broken ? 1 : 0}:${trendline.x1}:${trendline.x2}`)
       .join("|");
     const annotationKey = [
@@ -286,36 +294,41 @@ export default function MainChart({ candleMap, scenario, theme = "dark" }: Props
 
     // ── Draw trendlines ────────────────────────────────────────────
     if (showTrendlines) {
-      const activeTrendlines = scenario.trendlines.filter((t) => t.active);
-      for (const t of activeTrendlines.slice(0, 5)) {
-      // Extrapolate trendline from x1 to end of visible candles
-      const startIdx = Math.max(0, t.x1);
-      const endIdx = Math.min(candles.length - 1, t.x2 + Math.round((t.x2 - t.x1) * 0.5));
+      for (const t of activeChartTrendlines) {
+        const sourceTf = (t.sourceTimeframe as Timeframe | undefined) ?? selectedTf;
+        const sourceCandles = candleMap[sourceTf] || [];
+        if (!sourceCandles.length) continue;
+        if (t.x1 < 0 || t.x2 < 0 || t.x1 >= sourceCandles.length || t.x2 >= sourceCandles.length) continue;
 
-      if (startIdx >= candles.length || endIdx < 0) continue;
+        const anchor1 = sourceCandles[t.x1];
+        const anchor2 = sourceCandles[t.x2];
+        if (!anchor1 || !anchor2 || anchor2.time <= anchor1.time) continue;
 
-      const lineColor = t.kind === "ascending" ? "#26a69a" : "#ef5350";
-      const lineData: { time: UTCTimestamp; value: number }[] = [];
+        const startTime = Math.max(anchor1.time, candles[0]?.time ?? anchor1.time);
+        const endTime = candles[candles.length - 1]?.time ?? anchor2.time;
+        if (endTime <= startTime) continue;
 
-      // Sample points along the trendline
-      for (let idx = startIdx; idx <= endIdx && idx < candles.length; idx++) {
-        const price = extrapolatePrice(t, idx);
-        lineData.push({ time: candles[idx].time as UTCTimestamp, value: +price.toFixed(4) });
+        const lineColor = t.kind === "ascending" ? "#26a69a" : "#ef5350";
+        const lineData = candles
+          .filter((c) => c.time >= startTime && c.time <= endTime)
+          .map((c) => ({
+            time: c.time as UTCTimestamp,
+            value: +extrapolatePriceByTime(anchor1.time, t.y1, anchor2.time, t.y2, c.time).toFixed(4),
+          }));
+
+        if (lineData.length >= 2) {
+          const lineSeries = chart.addLineSeries({
+            color: lineColor,
+            lineWidth: 2,
+            lineStyle: t.broken ? LineStyle.Dashed : LineStyle.Solid,
+            crosshairMarkerVisible: false,
+            lastValueVisible: false,
+            priceLineVisible: false,
+          });
+          lineSeries.setData(lineData);
+          trendlineSeriesRef.current.push(lineSeries);
+        }
       }
-
-      if (lineData.length >= 2) {
-        const lineSeries = chart.addLineSeries({
-          color: lineColor,
-          lineWidth: 2,
-          lineStyle: t.broken ? LineStyle.Dashed : LineStyle.Solid,
-          crosshairMarkerVisible: false,
-          lastValueVisible: false,
-          priceLineVisible: false,
-        });
-        lineSeries.setData(lineData);
-        trendlineSeriesRef.current.push(lineSeries);
-      }
-    }
     } // end showTrendlines
 
     setLabelY({
@@ -323,7 +336,7 @@ export default function MainChart({ candleMap, scenario, theme = "dark" }: Props
       long: series.priceToCoordinate(scenario.pendingLong),
       short: series.priceToCoordinate(scenario.pendingShort),
     });
-  }, [candleMap, selectedTf, scenario, showTrendlines]);
+  }, [activeChartTrendlines, candleMap, selectedTf, scenario, showTrendlines]);
 
   useEffect(() => {
     updateChart();
