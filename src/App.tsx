@@ -34,7 +34,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [news, setNews] = useState<NewsItem[]>(() => getNews(symbol));
 
-  const { output: engine, loading, initializing, isStale } = useEngine(symbol, {
+  const { output: engine, loading, initializing, error, isStale } = useEngine(symbol, {
     refreshIntervalSec: settings.engineConfig.refreshIntervalSec,
     minSwingDistance: settings.engineConfig.minSwingDistance,
     minPriceSeparationPct: settings.engineConfig.minPriceSeparationPct,
@@ -64,7 +64,7 @@ export default function App() {
   );
 
   // Show a minimal skeleton while the very first fetch resolves
-  if (initializing || !engine) {
+  if (initializing) {
     return (
       <div className="app">
         <Header
@@ -77,6 +77,26 @@ export default function App() {
         <div className="loading-screen">
           <div className="loading-spinner" />
           <div className="loading-text">{t("loading.market")}</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!engine) {
+    return (
+      <div className="app">
+        <Header
+          direction={direction}
+          symbol={symbol}
+          onDirectionChange={setDirection}
+          onSymbolChange={handleSymbolChange}
+          onSettingsOpen={() => setSettingsOpen(true)}
+        />
+        <div className="loading-screen loading-error-screen">
+          <div className="loading-text loading-error-title">{t("loading.errorTitle")}</div>
+          <div className="loading-text loading-error-body">
+            {error ?? t("loading.errorBody")}
+          </div>
         </div>
       </div>
     );

@@ -67,6 +67,7 @@ export function generateCandles(
 
   // Scale volatility up for longer timeframes
   const vol = cfg.volatility * Math.sqrt(tfMul);
+  const baseVolume = 1000 + cfg.seed * 25 + tfMul * 40;
   let price: number = cfg.basePrice;
 
   // Pin the series to a stable epoch: midnight UTC of a fixed reference date.
@@ -85,6 +86,9 @@ export function generateCandles(
     const tail = rng() * vol * 0.4;
     const high = Math.max(open, close) + wick;
     const low = Math.min(open, close) - tail;
+    const relativeMove = Math.abs(change) / Math.max(vol, 0.0001);
+    const volumeNoise = 0.8 + rng() * 0.5;
+    const volume = baseVolume * volumeNoise * (1 + relativeMove * 0.6);
 
     candles.push({
       time: startTime + i * interval,
@@ -92,6 +96,7 @@ export function generateCandles(
       high: +high.toFixed(2),
       low: +low.toFixed(2),
       close: +close.toFixed(2),
+      volume: +volume.toFixed(2),
     });
     price = close;
   }

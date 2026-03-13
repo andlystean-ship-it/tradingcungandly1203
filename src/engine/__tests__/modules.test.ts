@@ -215,12 +215,14 @@ describe("generateCandles fallback", () => {
     const candles = generateCandles("BTC/USDT" as Symbol, "1H", 20);
     expect(candles).toHaveLength(20);
     expect(candles[0].open).toBeGreaterThan(0);
+    expect(candles[0].volume).toBeGreaterThan(0);
   });
 
   it("generates candles for an unknown dynamic symbol without crashing", () => {
     const candles = generateCandles("PEPE/USDT" as unknown as Symbol, "1H", 20);
     expect(candles).toHaveLength(20);
     expect(candles[0].open).toBeGreaterThan(0);
+    expect(candles[0].volume).toBeGreaterThan(0);
   });
 });
 
@@ -315,11 +317,22 @@ describe("scoreTimeframe", () => {
     expect(signal.bullishScore).toBeLessThan(45);
     expect(signal.bias).toBe("bearish");
   });
+
+  it("captures expanding volume in timeframe metrics", () => {
+    const candles = makeDirectionalCandles("up", 220, 100).map((candle, index, list) => ({
+      ...candle,
+      volume: index === list.length - 1 ? 3200 : 1400 + index * 3,
+    }));
+    const signal = scoreTimeframe("4H", candles);
+    expect(signal.volumeMetrics).toBeDefined();
+    expect(signal.volumeMetrics!.volumeState).toBe("expanding");
+    expect(signal.volumeMetrics!.score).toBeGreaterThan(50);
+  });
 });
 
 // ── Per-timeframe entries ─────────────────────────────────────────────────────
 import { getEntryForTimeframe } from "../scenario";
-import type { CandleMap, MarketBias, TrendContext } from "../../types";
+import type { CandleMap, MarketBias, TimeframeSignal, TrendContext } from "../../types";
 
 describe("getEntryForTimeframe", () => {
   const bullishBias: MarketBias = {
@@ -410,6 +423,29 @@ describe("getEntryForTimeframe", () => {
     expect(entry1d).not.toBeNull();
     expect(entry12h!.tf).toBe("12H");
     expect(entry1d!.tf).toBe("1D");
+  });
+
+  it("uses timeframe signal bias when it clearly conflicts with global bias", () => {
+    const candleMap: CandleMap = { "1H": makeTfCandles(60, 100) };
+    const globalBullishBias: MarketBias = {
+      bullishPercent: 64,
+      bearishPercent: 36,
+      dominantSide: "long",
+      confidence: 61,
+    };
+    const localBearishSignal: TimeframeSignal = {
+      timeframe: "1H",
+      bullishLevel: 101,
+      bearishLevel: 99,
+      bullishScore: 40,
+      bearishScore: 60,
+      bias: "bearish",
+      strength: 2,
+    };
+
+    const entry = getEntryForTimeframe("1H", candleMap, globalBullishBias, bullishTrendContext, localBearishSignal);
+    expect(entry).not.toBeNull();
+    expect(entry!.preferredSide).toBe("short");
   });
 });
 

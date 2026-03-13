@@ -23,7 +23,7 @@ import type {
   SourceMode,
 } from "../types";
 import { buildCandleMap, generateCandles } from "./candles";
-import { fetchCandleMap, type ProviderInfo } from "./market-data";
+import { fetchCandleMap, getProviderInfo, type ProviderInfo } from "./market-data";
 import { buildTrendlines } from "./trendlines";
 import { scoreTimeframe, TF_WEIGHTS, type HTFContext } from "./scoring";
 import { computeBias, type BiasContext } from "./bias";
@@ -52,7 +52,7 @@ const HTF_SET = new Set<Timeframe>(["4H", "6H", "8H", "12H", "1D", "1W"]);
 function runPipeline(
   symbol: Symbol,
   candleMap: CandleMap,
-  source: "live" | "partial",
+  source: "live" | "partial" | "error",
   sourceMode: SourceMode,
   warning?: string,
   perTimeframe?: Record<Timeframe, TimeframeStatus>,
@@ -184,14 +184,35 @@ export function runEngine(symbol: Symbol): EngineOutput {
 
 // ── Async engine (real Binance candles) ────────────────────────────────────────
 export async function runEngineAsync(symbol: Symbol, config?: EngineConfig): Promise<EngineOutput> {
-  const {
-    candleMap, source, sourceMode, warning, perTimeframe,
-    liveTfCount, totalTfCount, providerInfo,
-    missingTimeframes, timeframeCompleteness,
-  } = await fetchCandleMap(symbol);
-  return runPipeline(
-    symbol, candleMap, source, sourceMode, warning, perTimeframe,
-    liveTfCount, totalTfCount, providerInfo,
-    missingTimeframes, timeframeCompleteness, config,
-  );
+  try {
+    const {
+      candleMap, source, sourceMode, warning, perTimeframe,
+      liveTfCount, totalTfCount, providerInfo,
+      missingTimeframes, timeframeCompleteness,
+    } = await fetchCandleMap(symbol);
+    return runPipeline(
+      symbol, candleMap, source, sourceMode, warning, perTimeframe,
+      liveTfCount, totalTfCount, providerInfo,
+      missingTimeframes, timeframeCompleteness, config,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const fallbackMap = buildCandleMap(symbol);
+    const warning = `Live market data unavailable. Showing deterministic offline fallback candles. ${message}`;
+
+    return runPipeline(
+      symbol,
+      fallbackMap,
+      "error",
+      "unavailable",
+      warning,
+      undefined,
+      0,
+      Object.keys(TF_WEIGHTS).length,
+      getProviderInfo(symbol),
+      undefined,
+      0,
+      config,
+    );
+  }
 }

@@ -47,10 +47,12 @@ type KlinePayload = {
   e: string;
   k: {
     t: number;   // open time ms
+    i: string;   // interval
     o: string;   // open
     h: string;   // high
     l: string;   // low
     c: string;   // close
+    v: string;   // volume
     x: boolean;  // is candle closed?
   };
 };
@@ -118,9 +120,7 @@ export class BinanceWsClient {
         const k = payload.k;
 
         // Determine timeframe from the stream data
-        const matchedTf = Object.entries(TF_MAP).find(
-          ([, v]) => event.data.includes(`"i":"${v}"`)
-        );
+        const matchedTf = Object.entries(TF_MAP).find(([, v]) => k.i === v);
 
         if (!matchedTf) return;
 
@@ -133,6 +133,7 @@ export class BinanceWsClient {
           high: parseFloat(k.h),
           low: parseFloat(k.l),
           close: parseFloat(k.c),
+          volume: parseFloat(k.v),
         };
 
         this.lastSnapshot.set(timeframe, candle);

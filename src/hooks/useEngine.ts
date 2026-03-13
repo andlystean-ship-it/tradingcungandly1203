@@ -10,9 +10,10 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import type { Symbol, EngineOutput } from "../types";
+import type { Symbol, EngineOutput, Timeframe, CandleData } from "../types";
 import { runEngineAsync, type EngineConfig as CoreEngineConfig } from "../engine/index";
 import { recordSignal } from "../engine/signal-history";
+import { BinanceWsClient } from "../engine/ws-client";
 
 export type EngineConfig = {
   /** Minimum swing distance (candle indices) — passed to engine for future use */
@@ -35,6 +36,69 @@ export type EngineState = {
 
 /** Default refresh interval */
 const DEFAULT_REFRESH_SEC = 3;
+const WS_TRIGGER_TIMEFRAMES: Timeframe[] = ["15M", "1H", "2H", "4H", "6H", "8H", "12H", "1D", "1W"];
+const WS_REFRESH_COOLDOWN_MS = 1200;
+
+function mergeRealtimeCandle(
+  prev: EngineOutput,
+  timeframe: Timeframe,
+  candle: CandleData,
+): EngineOutput {
+  const tfCandles = prev.candleMap[timeframe];
+  if (!tfCandles || tfCandles.length === 0) return prev;
+
+  const nextTfCandles = [...tfCandles];
+  const last = nextTfCandles[nextTfCandles.length - 1];
+
+  if (!last) {
+    nextTfCandles.push(candle);
+  } else if (candle.time < last.time) {
+    return prev;
+  } else if (candle.time === last.time) {
+    nextTfCandles[nextTfCandles.length - 1] = {
+      ...last,
+      open: last.open,
+      high: Math.max(last.high, candle.high),
+      low: Math.min(last.low, candle.low),
+      close: candle.close,
+      volume: candle.volume ?? last.volume,
+    };
+  } else {
+    nextTfCandles.push(candle);
+    const maxLen = Math.max(tfCandles.length, 180);
+    while (nextTfCandles.length > maxLen) {
+      nextTfCandles.shift();
+    }
+  }
+
+  const nextCandleMap = {
+    ...prev.candleMap,
+    [timeframe]: nextTfCandles,
+  };
+
+  const now = new Date().toISOString();
+  const next: EngineOutput = {
+    ...prev,
+    lastUpdated: now,
+    candleMap: nextCandleMap,
+    dataStatus: {
+      ...prev.dataStatus,
+      lastUpdated: now,
+    },
+  };
+
+  if (timeframe === "1H") {
+    const chartLen = prev.chartCandles.length > 0 ? prev.chartCandles.length : 120;
+    next.chartCandles = nextTfCandles.slice(-chartLen);
+    next.currentPrice = candle.close;
+    next.marketScenario = {
+      ...prev.marketScenario,
+      currentPrice: candle.close,
+    };
+  }
+
+  return next;
+}
 
 export function useEngine(symbol: Symbol, config?: EngineConfig): EngineState {
   const refreshInterval = Math.max(1, config?.refreshIntervalSec ?? DEFAULT_REFRESH_SEC) * 1000;
@@ -48,6 +112,7 @@ export function useEngine(symbol: Symbol, config?: EngineConfig): EngineState {
   const symbolRef = useRef(symbol);
   symbolRef.current = symbol;
   const isRefreshingRef = useRef(false);
+  const lastWsRefreshAtRef = useRef(0);
 
   const refresh = useCallback(async (isInitial: boolean) => {
     if (isRefreshingRef.current) return;
@@ -115,6 +180,36 @@ export function useEngine(symbol: Symbol, config?: EngineConfig): EngineState {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbol, refreshInterval]);
+
+  useEffect(() => {
+    if (typeof WebSocket === "undefined") return;
+
+    const wsClient = new BinanceWsClient({
+      symbol,
+      timeframes: WS_TRIGGER_TIMEFRAMES,
+      onUpdate: ({ timeframe, candle, isClosed }) => {
+        setOutput((prev) => {
+          if (!prev || prev.symbol !== symbol) return prev;
+          return mergeRealtimeCandle(prev, timeframe, candle);
+        });
+        setIsStale(false);
+
+        if (!isClosed) return;
+        const now = Date.now();
+        if (now - lastWsRefreshAtRef.current < WS_REFRESH_COOLDOWN_MS) return;
+        lastWsRefreshAtRef.current = now;
+        void refresh(false);
+      },
+      onError: () => {
+        // Polling refresh remains as fallback path.
+      },
+    });
+
+    wsClient.connect();
+    return () => {
+      wsClient.disconnect();
+    };
+  }, [symbol, refresh]);
 
   return { output, loading, initializing, error, isStale };
 }

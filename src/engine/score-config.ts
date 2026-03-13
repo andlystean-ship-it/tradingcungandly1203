@@ -19,18 +19,20 @@ export type ScoreWeights = {
   momentum: number;
   volatility: number;
   htfAlignment: number;
+  volume: number;
 };
 
 export const DEFAULT_WEIGHTS: Readonly<ScoreWeights> = {
-  structure: 0.17,
+  structure: 0.15,
   pivot: 0.10,
   srReaction: 0.12,
-  trendline: 0.12,
+  trendline: 0.11,
   ema: 0.12,
   candlePattern: 0.08,
-  momentum: 0.15,
+  momentum: 0.12,
   volatility: 0.04,
   htfAlignment: 0.10,
+  volume: 0.06,
 };
 
 // ── Score breakdown: per-component output for audit / debug ──────────────────
@@ -45,6 +47,7 @@ export type ScoreBreakdown = {
   momentum: number;
   volatility: number;
   htfAlignment: number;
+  volume: number;
   position?: number;
   pivotReclaim?: number;
   support?: number;

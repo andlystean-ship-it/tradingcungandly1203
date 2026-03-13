@@ -34,7 +34,15 @@
     "neutral": "◆ NEUTRAL"
   },
   "timeframe": {
-    "confluence": "Multi-Timeframe Confluence"
+    "confluence": "Multi-Timeframe Confluence",
+    "volumeLabel": "Volume",
+    "volumeConfirmed": "V: confirmed",
+    "volumeLow": "V: low",
+    "volumeOppose": "V: expanding",
+    "volumeNeutral": "V: neutral",
+    "volumeUnknown": "V: n/a",
+    "ready": "ready",
+    "wait": "wait"
   },
   "tabs": {
     "signals": "Live Signals",
@@ -80,7 +88,9 @@
     "secondaryOnly": "This panel is secondary context only. If live news is unavailable, the engine continues without using articles to generate signals."
   },
   "loading": {
-    "market": "Loading market data…"
+    "market": "Loading market data…",
+    "errorTitle": "Market engine failed to load",
+    "errorBody": "The app could not load live market data and did not produce a fallback output yet. Check network access or the dev proxy, then reload the page."
   },
   "settings": {
     "title": "Settings",

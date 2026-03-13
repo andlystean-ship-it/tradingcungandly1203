@@ -10,6 +10,7 @@ import type {
   Bias,
   LevelMeta,
   CandlePattern,
+  VolumeMetrics,
 } from "../types";
 import { calcPivot, nearestSupport, nearestResistance } from "./pivot";
 import { buildTrendlines } from "./trendlines";
@@ -157,6 +158,79 @@ function scoreVolatility(candles: CandleData[]): number {
   return 50;
 }
 
+function averageVolume(candles: CandleData[], period: number): number {
+  const volumes = candles
+    .slice(-Math.min(period, candles.length))
+    .map((candle) => candle.volume)
+    .filter((volume): volume is number => typeof volume === "number" && Number.isFinite(volume));
+  if (volumes.length === 0) return 0;
+  return volumes.reduce((sum, volume) => sum + volume, 0) / volumes.length;
+}
+
+function scoreVolume(candles: CandleData[]): VolumeMetrics {
+  const latest = candles[candles.length - 1];
+  const currentVolume = latest?.volume;
+  if (typeof currentVolume !== "number" || !Number.isFinite(currentVolume)) {
+    return {
+      currentVolume: 0,
+      averageVolume20: 0,
+      averageVolume50: 0,
+      volumeRatio: 1,
+      volumeState: "neutral",
+      directionalBias: "neutral",
+      score: 50,
+      confirmsMove: false,
+    };
+  }
+
+  const averageVolume20 = averageVolume(candles, 20) || currentVolume;
+  const averageVolume50 = averageVolume(candles, 50) || averageVolume20;
+  const volumeRatio = currentVolume / Math.max(averageVolume20, 0.0001);
+  const volumeState = volumeRatio >= 1.15
+    ? "expanding"
+    : volumeRatio <= 0.85
+      ? "contracting"
+      : "neutral";
+
+  const recent = candles.slice(-5);
+  let weightedPressure = 0;
+  let totalWeight = 0;
+  recent.forEach((candle, index) => {
+    const weight = (index + 1) / recent.length;
+    const range = Math.max(candle.high - candle.low, 0.0001);
+    const body = candle.close - candle.open;
+    weightedPressure += (body / range) * weight;
+    totalWeight += weight;
+  });
+
+  const normalizedPressure = totalWeight > 0
+    ? Math.max(-1, Math.min(1, weightedPressure / totalWeight))
+    : 0;
+  const directionalBias: Bias = normalizedPressure > 0.12
+    ? "bullish"
+    : normalizedPressure < -0.12
+      ? "bearish"
+      : "neutral";
+
+  let score = 50 + normalizedPressure * 22;
+  if (volumeState === "expanding") {
+    score += normalizedPressure * 18 + Math.min(12, Math.max(0, (volumeRatio - 1) * 18));
+  } else if (volumeState === "contracting") {
+    score += normalizedPressure * 8 - Math.min(10, Math.max(0, (1 - volumeRatio) * 30));
+  }
+
+  return {
+    currentVolume: Math.round(currentVolume * 100) / 100,
+    averageVolume20: Math.round(averageVolume20 * 100) / 100,
+    averageVolume50: Math.round(averageVolume50 * 100) / 100,
+    volumeRatio: Math.round(volumeRatio * 100) / 100,
+    volumeState,
+    directionalBias,
+    score: Math.round(clampScore(score)),
+    confirmsMove: directionalBias !== "neutral" && volumeRatio >= 1.05,
+  };
+}
+
 function scoreHTFAlignment(timeframe: Timeframe, htfContext?: HTFContext): number {
   const parent = HTF_PARENT[timeframe];
   if (!parent || !htfContext) return 50;
@@ -169,6 +243,7 @@ function deriveReasoningTags(
   trendlineScore: number,
   emaScore: number,
   patterns: CandlePattern[],
+  volumeMetrics: VolumeMetrics,
 ): string[] {
   const tags: string[] = [];
   if (structureState === "bullish") tags.push("HH/HL structure");
@@ -179,6 +254,9 @@ function deriveReasoningTags(
   if (trendlineScore <= 40) tags.push("active resistance respected");
   if (emaScore >= 60) tags.push("EMA trend bullish");
   if (emaScore <= 40) tags.push("EMA trend bearish");
+  if (volumeMetrics.volumeState === "expanding" && volumeMetrics.directionalBias === "bullish") tags.push("bullish volume expansion");
+  if (volumeMetrics.volumeState === "expanding" && volumeMetrics.directionalBias === "bearish") tags.push("bearish volume expansion");
+  if (volumeMetrics.volumeState === "contracting") tags.push("volume contraction");
   for (const pattern of patterns.slice(-2)) tags.push(pattern.name);
   return tags;
 }
@@ -210,6 +288,8 @@ export function scoreTimeframe(
   const sMomentum = scoreMomentum(candles);
   const sVolatility = scoreVolatility(candles);
   const sHtf = scoreHTFAlignment(timeframe, htfContext);
+  const volumeMetrics = scoreVolume(candles);
+  const sVolume = volumeMetrics.score;
 
   const w = DEFAULT_WEIGHTS;
   const rawScore =
@@ -221,7 +301,8 @@ export function scoreTimeframe(
     sPattern * w.candlePattern +
     sMomentum * w.momentum +
     sVolatility * w.volatility +
-    sHtf * w.htfAlignment;
+    sHtf * w.htfAlignment +
+    sVolume * w.volume;
 
   const directionalBoost = (sMomentum - 50) * 0.18 + (sEma - 50) * 0.16 + (sTrendline - 50) * 0.12;
   const bullishScore = Math.round(clampScore(rawScore + directionalBoost));
@@ -238,6 +319,7 @@ export function scoreTimeframe(
     momentum: Math.round(sMomentum),
     volatility: Math.round(sVolatility),
     htfAlignment: Math.round(sHtf),
+    volume: Math.round(sVolume),
     position: Math.round(sStructure),
     pivotReclaim: Math.round(sPivot),
     support: Math.round(sSrReaction),
@@ -269,8 +351,9 @@ export function scoreTimeframe(
     scoreBreakdown,
     bullishLevelMeta,
     bearishLevelMeta,
-    reasoningTags: deriveReasoningTags(structure.state, sPivot, sTrendline, sEma, patterns),
+    reasoningTags: deriveReasoningTags(structure.state, sPivot, sTrendline, sEma, patterns, volumeMetrics),
     emaState,
+    volumeMetrics,
     candlePatterns: patterns.slice(-3),
     srZones: zones.slice(0, 6),
   };

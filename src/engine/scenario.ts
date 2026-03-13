@@ -622,6 +622,20 @@ function resolveEntryBias(
   return bullishVotes >= bearishVotes ? "long" : "short";
 }
 
+function resolveTimeframeEntryBias(
+  timeframeSignal: TimeframeSignal | undefined,
+  marketBias: MarketBias,
+  trendContext: TrendContext,
+): "long" | "short" {
+  if (timeframeSignal && timeframeSignal.bias !== "neutral") {
+    const edge = Math.abs(timeframeSignal.bullishScore - timeframeSignal.bearishScore);
+    if (edge >= 8) {
+      return timeframeSignal.bias === "bullish" ? "long" : "short";
+    }
+  }
+  return resolveEntryBias(marketBias, trendContext);
+}
+
 /**
  * Compute entry levels (long/short) for a single timeframe using that
  * timeframe's own pivot, swing, and trendline structure.
@@ -634,11 +648,12 @@ export function getEntryForTimeframe(
   candleMap: CandleMap,
   marketBias: MarketBias,
   trendContext: TrendContext,
+  timeframeSignal?: TimeframeSignal,
 ): TimeframeEntry | null {
   const candles = candleMap[tf];
   if (!candles || candles.length < 10) return null;
 
-  const preferredSide = resolveEntryBias(marketBias, trendContext);
+  const preferredSide = resolveTimeframeEntryBias(timeframeSignal, marketBias, trendContext);
 
   const currentPrice = candles[candles.length - 1].close;
   const levels = calcPivot(candles);
@@ -1035,7 +1050,7 @@ export function buildScenario(input: ScenarioInput): MarketScenario {
     alternateQuality: alternateEntryQuality,
     primaryScenarioIsActionable,
     primaryRejectReason,
-    entriesByTF: computeEntriesByTF(candleMap, marketBias, trendContext),
+    entriesByTF: computeEntriesByTF(candleMap, timeframeSignals, marketBias, trendContext),
     srZones,
     candlePatterns,
     stepByStepSignal,
@@ -1045,23 +1060,91 @@ export function buildScenario(input: ScenarioInput): MarketScenario {
 /** Compute per-timeframe entries for key dashboard timeframes. */
 function computeEntriesByTF(
   candleMap: CandleMap,
+  timeframeSignals: TimeframeSignal[],
   marketBias: MarketBias,
   trendContext: TrendContext,
 ): TimeframeEntry[] {
   const entries: TimeframeEntry[] = [];
+  const signalMap = new Map<Timeframe, TimeframeSignal>();
+  for (const signal of timeframeSignals) signalMap.set(signal.timeframe, signal);
   for (const tf of ENTRY_TFS) {
-    const entry = getEntryForTimeframe(tf, candleMap, marketBias, trendContext);
+    const signal = signalMap.get(tf);
+    const entry = getEntryForTimeframe(tf, candleMap, marketBias, trendContext, signal);
     if (!entry) continue;
     const preferredEntry = entry.preferredSide === "short" ? entry.shortEntry : entry.longEntry;
-    const qualityScore = Math.round(Math.max(20, Math.min(95, 50 + marketBias.confidence * 0.35 + (trendContext.pressure?.pressureStrength ?? 0) * 0.15)));
+    const directionalScore = entry.preferredSide === "short"
+      ? signal?.bearishScore ?? 50
+      : signal?.bullishScore ?? 50;
+    const breakdown = signal?.scoreBreakdown;
+    const confluenceBase = breakdown
+      ? (
+          breakdown.structure * 0.22 +
+          breakdown.srReaction * 0.20 +
+          breakdown.trendline * 0.16 +
+          breakdown.ema * 0.16 +
+          breakdown.momentum * 0.12 +
+          breakdown.htfAlignment * 0.14
+        )
+      : 50;
+    const volumeMetrics = signal?.volumeMetrics;
+    const volumeConfirmed = volumeMetrics
+      ? (entry.preferredSide === "short"
+          ? volumeMetrics.directionalBias === "bearish"
+          : volumeMetrics.directionalBias === "bullish") && volumeMetrics.confirmsMove
+      : undefined;
+    const volumeOpposes = volumeMetrics
+      ? (entry.preferredSide === "short"
+          ? volumeMetrics.directionalBias === "bullish"
+          : volumeMetrics.directionalBias === "bearish") && volumeMetrics.volumeRatio >= 1.05
+      : false;
+    const volumeAdjustment = volumeMetrics
+      ? volumeConfirmed
+        ? 6
+        : volumeOpposes
+          ? -10
+          : volumeMetrics.volumeState === "contracting"
+            ? -4
+            : -1
+      : 0;
+    const qualityScore = Math.round(Math.max(
+      20,
+      Math.min(
+        95,
+        34 +
+          marketBias.confidence * 0.22 +
+          (trendContext.pressure?.pressureStrength ?? 0) * 0.10 +
+          (directionalScore - 50) * 0.14 +
+          (confluenceBase - 50) * 0.24 +
+          volumeAdjustment,
+      ),
+    ));
     entry.qualityScore = qualityScore;
-    entry.actionable = marketBias.dominantSide !== "neutral" && qualityScore >= 55;
+    entry.volumeScore = volumeMetrics?.score;
+    entry.volumeState = volumeMetrics?.volumeState;
+    entry.volumeConfirmed = volumeConfirmed;
+    entry.actionable = marketBias.dominantSide !== "neutral" && qualityScore >= 56 && !volumeOpposes;
     entry.reasons = [
       `preferred ${entry.preferredSide ?? "neutral"}`,
       `entry ${preferredEntry.toFixed(2)}`,
       `target ${entry.target.toFixed(2)}`,
       `invalidation ${entry.invalidation.toFixed(2)}`,
+      `confluence ${confluenceBase.toFixed(0)}/100`,
     ];
+    if (signal) {
+      entry.reasons.push(`signal ${signal.bias} ${directionalScore}/100`);
+    }
+    if (volumeMetrics) {
+      entry.reasons.push(`volume ${volumeMetrics.volumeState} x${volumeMetrics.volumeRatio.toFixed(2)}`);
+      if (volumeConfirmed) {
+        entry.reasons.push(`volume confirms ${entry.preferredSide ?? "setup"}`);
+      } else if (volumeOpposes) {
+        entry.reasons.push(`volume opposes ${entry.preferredSide ?? "setup"}`);
+      } else if (volumeMetrics.directionalBias !== "neutral") {
+        entry.reasons.push(`volume leaning ${volumeMetrics.directionalBias}`);
+      } else {
+        entry.reasons.push("volume neutral");
+      }
+    }
     entries.push(entry);
   }
   return entries;

@@ -43,6 +43,7 @@ export type CandleData = {
   high: number;
   low: number;
   close: number;
+  volume?: number;
 };
 
 /** Candle map — may be partial if some TFs failed to fetch */
@@ -149,6 +150,19 @@ export type EMAState = {
   direction: TrendDirection;
 };
 
+export type VolumeState = "expanding" | "contracting" | "neutral";
+
+export type VolumeMetrics = {
+  currentVolume: number;
+  averageVolume20: number;
+  averageVolume50: number;
+  volumeRatio: number;
+  volumeState: VolumeState;
+  directionalBias: Bias;
+  score: number;
+  confirmsMove: boolean;
+};
+
 // ── Trend pressure model (P4) ────────────────────────────────────────────────
 export type TrendPressure = {
   /** -100 (strong bearish) to +100 (strong bullish) */
@@ -192,6 +206,7 @@ export type TimeframeSignal = {
   bearishLevelMeta?: LevelMeta;
   reasoningTags?: string[];
   emaState?: EMAState;
+  volumeMetrics?: VolumeMetrics;
   candlePatterns?: CandlePattern[];
   srZones?: SRZone[];
 };
@@ -247,6 +262,9 @@ export type TimeframeEntry = {
   preferredSide?: Direction | "neutral";
   qualityScore?: number;
   actionable?: boolean;
+  volumeScore?: number;
+  volumeState?: VolumeState;
+  volumeConfirmed?: boolean;
   reasons?: string[];
   longReason: string;
   shortReason: string;

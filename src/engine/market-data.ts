@@ -24,7 +24,9 @@ import type { CandleData, CandleMap, Symbol, Timeframe, TimeframeStatus, SourceM
 import { FETCH_COUNTS } from "./windows";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const BINANCE_BASE = "https://api.binance.com/api/v3";
+const BINANCE_BASE = import.meta.env?.DEV
+  ? "/api/binance/api/v3"
+  : "https://api.binance.com/api/v3";
 const FETCH_TIMEOUT_MS = 8000;
 
 // ── Symbol → Binance pair ─────────────────────────────────────────────────────
@@ -138,6 +140,7 @@ function parseKlines(rows: BinanceKline[]): CandleData[] {
     high: parseFloat(row[2]),
     low: parseFloat(row[3]),
     close: parseFloat(row[4]),
+    volume: parseFloat(row[5]),
   }));
 }
 

@@ -5,7 +5,7 @@
  * P5 additions: score breakdown / calibration, entry quality gating,
  * trend pressure, data status, regression fixtures, invariant tests.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import type { CandleData, Timeframe, TimeframeSignal, MarketBias, TrendContext } from "../../types";
 import { scoreTimeframe, type HTFContext } from "../scoring";
 import { computeBias } from "../bias";
@@ -15,7 +15,11 @@ import { detectSwingHighs, detectSwingLows, detectSwingsWithDebug, type SwingCon
 import { buildTrendlines, buildTrendlinesWithDebug } from "../trendlines";
 import { buildTrendContext } from "../trend-context";
 import { DEFAULT_WEIGHTS, ENTRY_QUALITY, BIAS_THRESHOLDS, validateWeights, type ScoreBreakdown } from "../score-config";
-import { runEngine } from "../index";
+import { runEngine, runEngineAsync } from "../index";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function makeCandles(
@@ -816,17 +820,17 @@ describe("score-config", () => {
 });
 
 describe("score breakdown", () => {
-  it("scoreTimeframe returns a ScoreBreakdown with all 9 components", () => {
+  it("scoreTimeframe returns a ScoreBreakdown with all 10 components", () => {
     const candles = makeCandles(100, 40, 0.03);
     const signal = scoreTimeframe("1H", candles);
 
     expect(signal.scoreBreakdown).toBeDefined();
     const bd = signal.scoreBreakdown!;
 
-    // All 9 components should be 0–100
+    // All 10 components should be 0–100
     const components: (keyof ScoreBreakdown)[] = [
       "position", "pivotReclaim", "momentum", "support",
-      "resistance", "trendline", "breakRetest", "volatility", "htfAlignment",
+      "resistance", "trendline", "breakRetest", "volatility", "htfAlignment", "volume",
     ];
     for (const key of components) {
       expect(bd[key]).toBeGreaterThanOrEqual(0);
@@ -843,6 +847,18 @@ describe("score breakdown", () => {
     const s2 = scoreTimeframe("4H", candles);
 
     expect(s1.scoreBreakdown).toEqual(s2.scoreBreakdown);
+  });
+
+  it("exposes volume metrics when candle data includes volume", () => {
+    const candles = makeCandles(100, 40, 0.03).map((candle, index, list) => ({
+      ...candle,
+      volume: index === list.length - 1 ? 4200 : 1700 + index * 8,
+    }));
+    const signal = scoreTimeframe("1H", candles);
+
+    expect(signal.volumeMetrics).toBeDefined();
+    expect(signal.volumeMetrics!.volumeRatio).toBeGreaterThan(1);
+    expect(signal.scoreBreakdown!.volume).toBe(signal.volumeMetrics!.score);
   });
 });
 
@@ -997,6 +1013,18 @@ describe("data source tracking", () => {
     const output = runEngine("ETH/USDT");
     expect(output.dataStatus.sourceStatus).not.toBe("stale");
     expect(output.dataStatus.sourceStatus).not.toBe("error");
+  });
+
+  it("async engine falls back to deterministic offline candles when live fetch fails", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network down"));
+
+    const output = await runEngineAsync("BTC/USDT");
+
+    expect(output.chartCandles.length).toBeGreaterThan(0);
+    expect(output.dataStatus.sourceStatus).toBe("error");
+    expect(output.dataStatus.sourceMode).toBe("unavailable");
+    expect(output.dataStatus.timeframeCompleteness).toBe(0);
+    expect(output.dataStatus.warning).toContain("offline fallback");
   });
 });
 

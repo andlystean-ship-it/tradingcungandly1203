@@ -34,7 +34,15 @@
     "neutral": "◆ TRUNG LẬP"
   },
   "timeframe": {
-    "confluence": "Multi-Timeframe Confluence"
+    "confluence": "Multi-Timeframe Confluence",
+    "volumeLabel": "Volume",
+    "volumeConfirmed": "V: xác nhận",
+    "volumeLow": "V: thấp",
+    "volumeOppose": "V: mở rộng",
+    "volumeNeutral": "V: trung tính",
+    "volumeUnknown": "V: n/a",
+    "ready": "sẵn sàng",
+    "wait": "chờ"
   },
   "tabs": {
     "signals": "Tín hiệu Live",
@@ -80,7 +88,9 @@
     "secondaryOnly": "Khung này chỉ là ngữ cảnh phụ. Khi feed live không sẵn có, engine vẫn chạy mà không dùng tin tức để tạo tín hiệu."
   },
   "loading": {
-    "market": "Đang tải dữ liệu thị trường…"
+    "market": "Đang tải dữ liệu thị trường…",
+    "errorTitle": "Không tải được engine thị trường",
+    "errorBody": "Không thể lấy dữ liệu live và cũng chưa dựng được output fallback. Kiểm tra kết nối mạng hoặc dev proxy rồi tải lại trang."
   },
   "settings": {
     "title": "Cài đặt",
