@@ -56,6 +56,9 @@ export default function DataSourceBadge({
           className={`source-dot ${isLive ? "live" : "offline"} ${loading ? "pulse" : ""}`}
           aria-hidden="true"
         />
+        <span className={`source-state ${isLive ? "live" : "offline"}`}>
+          {isLive ? "LIVE" : "OFFLINE"}
+        </span>
         <span className={`source-label ${isLive ? "live" : "offline"}`}>
           {sourceLabel}
         </span>
@@ -68,7 +71,7 @@ export default function DataSourceBadge({
         {loading && (
           <span className="source-fetching">{t("dataSource.refreshing")}</span>
         )}
-        <span className="source-time">{t("dataSource.updatedAt")}: {formatTime(lastUpdated)}</span>
+        <span className="source-time">{formatTime(lastUpdated)}</span>
       </div>
 
       {proxyWarning && (

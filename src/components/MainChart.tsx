@@ -62,9 +62,32 @@ export default function MainChart({ candleMap, scenario, theme = "dark" }: Props
   const priceLinesRef = useRef<IPriceLine[]>([]);
   const trendlineSeriesRef = useRef<ISeriesApi<"Line">[]>([]);
   const lastSeriesStateRef = useRef<{ timeframe: Timeframe; length: number; lastTime: number | null } | null>(null);
+  const annotationKeyRef = useRef<string>("");
   const [selectedTf, setSelectedTf] = useState<Timeframe>("1H");
   const [showTrendlines, setShowTrendlines] = useState(true);
   const [showExplanation, setShowExplanation] = useState(true);
+  const [labelY, setLabelY] = useState<{ target: number | null; long: number | null; short: number | null }>({
+    target: null,
+    long: null,
+    short: null,
+  });
+  const selectedCandles = candleMap[selectedTf] || [];
+  const lastSelectedCandle = selectedCandles[selectedCandles.length - 1];
+
+  const formatLastCandleTime = (time?: number) => {
+    if (!time) return "n/a";
+    try {
+      return new Date(time * 1000).toLocaleString("vi-VN", {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        day: "2-digit",
+        month: "2-digit",
+      });
+    } catch {
+      return "n/a";
+    }
+  };
 
   // ── Create chart once ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -131,6 +154,8 @@ export default function MainChart({ candleMap, scenario, theme = "dark" }: Props
       seriesRef.current = null;
       priceLinesRef.current = [];
       trendlineSeriesRef.current = [];
+      lastSeriesStateRef.current = null;
+      annotationKeyRef.current = "";
     };
   }, [theme]);
 
@@ -157,13 +182,17 @@ export default function MainChart({ candleMap, scenario, theme = "dark" }: Props
       data.length === 0 ||
       previousState.length > data.length ||
       previousState.lastTime === null ||
-      previousState.lastTime !== candles[candles.length - 1]?.time;
+      (lastBar ? (lastBar.time as number) < previousState.lastTime : false);
 
     if (shouldResetSeries) {
       series.setData(data);
-      chart.timeScale().fitContent();
     } else if (lastBar) {
-      series.update(lastBar);
+      const lastBarTime = lastBar.time as number;
+      if (lastBarTime === previousState.lastTime || data.length === previousState.length + 1) {
+        series.update(lastBar);
+      } else {
+        series.setData(data);
+      }
     }
 
     lastSeriesStateRef.current = {
@@ -171,6 +200,40 @@ export default function MainChart({ candleMap, scenario, theme = "dark" }: Props
       length: data.length,
       lastTime: candles[candles.length - 1]?.time ?? null,
     };
+
+    const zoneKey = (scenario.srZones ?? [])
+      .filter((item) => item.timeframe === selectedTf || item.timeframe === "multi")
+      .slice(0, 4)
+      .map((zone) => `${zone.kind}:${zone.center.toFixed(2)}:${zone.strengthScore}`)
+      .join("|");
+    const trendKey = scenario.trendlines
+      .filter((trendline) => trendline.active)
+      .slice(0, 5)
+      .map((trendline) => `${trendline.id}:${trendline.broken ? 1 : 0}:${trendline.x1}:${trendline.x2}`)
+      .join("|");
+    const annotationKey = [
+      selectedTf,
+      showTrendlines ? "1" : "0",
+      scenario.pendingLong.toFixed(2),
+      scenario.pendingShort.toFixed(2),
+      scenario.targetPrice.toFixed(2),
+      scenario.pivot.toFixed(2),
+      scenario.invalidationLevel.toFixed(2),
+      scenario.r1.toFixed(2),
+      scenario.s1.toFixed(2),
+      zoneKey,
+      trendKey,
+    ].join("#");
+
+    if (annotationKeyRef.current === annotationKey) {
+      setLabelY({
+        target: series.priceToCoordinate(scenario.targetPrice),
+        long: series.priceToCoordinate(scenario.pendingLong),
+        short: series.priceToCoordinate(scenario.pendingShort),
+      });
+      return;
+    }
+    annotationKeyRef.current = annotationKey;
 
     // ── Remove old price lines ─────────────────────────────────────
     for (const pl of priceLinesRef.current) {
@@ -254,11 +317,21 @@ export default function MainChart({ candleMap, scenario, theme = "dark" }: Props
       }
     }
     } // end showTrendlines
+
+    setLabelY({
+      target: series.priceToCoordinate(scenario.targetPrice),
+      long: series.priceToCoordinate(scenario.pendingLong),
+      short: series.priceToCoordinate(scenario.pendingShort),
+    });
   }, [candleMap, selectedTf, scenario, showTrendlines]);
 
   useEffect(() => {
     updateChart();
   }, [updateChart]);
+
+  useEffect(() => {
+    chartRef.current?.timeScale().fitContent();
+  }, [selectedTf, theme]);
 
   return (
     <div className="chart-section">
@@ -299,8 +372,31 @@ export default function MainChart({ candleMap, scenario, theme = "dark" }: Props
         </button>
       </div>
 
+      <div className="chart-status-strip">
+        <span>TF: {selectedTf}</span>
+        <span>Candles: {selectedCandles.length}</span>
+        <span>Last candle: {formatLastCandleTime(lastSelectedCandle?.time)}</span>
+        <span>Close: {lastSelectedCandle?.close?.toFixed(2) ?? "n/a"}</span>
+      </div>
+
       {/* ── Interactive chart ───────────────────────────────────────── */}
-      <div ref={containerRef} className="lw-chart-container" />
+      <div className="chart-canvas-wrap">
+        <div ref={containerRef} className="lw-chart-container" />
+        <div className="chart-labels" aria-hidden="true">
+          <div className="price-label target" style={{ top: labelY.target ?? 120 }}>
+            <span className="label-title">Giá Thị Trường Sẽ Hướng Tới</span>
+            <span className="label-price">{scenario.targetPrice.toFixed(2)}</span>
+          </div>
+          <div className="price-label short" style={{ top: labelY.short ?? 170 }}>
+            <span className="label-title">Đặt Lệnh Chờ Tự Động Short</span>
+            <span className="label-price">{scenario.pendingShort.toFixed(2)}</span>
+          </div>
+          <div className="price-label long" style={{ top: labelY.long ?? 220 }}>
+            <span className="label-title">Đặt Lệnh Chờ Tự Động Long</span>
+            <span className="label-price">{scenario.pendingLong.toFixed(2)}</span>
+          </div>
+        </div>
+      </div>
 
       {/* ── Reasoning overlay ───────────────────────────────────────── */}
       {showExplanation && (

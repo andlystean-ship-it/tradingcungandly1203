@@ -25,8 +25,8 @@ export default function ChartTabs({ scenario, trendContext, marketBias, dataStat
           role="tab"
           aria-selected={activeTab === "signals"}
         >
-          <span className="live-dot" aria-hidden="true" />
-          {t("tabs.signals")}
+          <span className="chart-tab-icon" aria-hidden="true">●</span>
+          <span>{t("tabs.signals")}</span>
         </button>
         <button
           className={`chart-tab ${activeTab === "analysis" ? "active" : ""}`}
@@ -34,7 +34,8 @@ export default function ChartTabs({ scenario, trendContext, marketBias, dataStat
           role="tab"
           aria-selected={activeTab === "analysis"}
         >
-          {t("tabs.analysis")}
+          <span className="chart-tab-icon" aria-hidden="true">AI</span>
+          <span>{t("tabs.analysis")}</span>
         </button>
         <button
           className={`chart-tab ${activeTab === "trendlines" ? "active" : ""}`}
@@ -42,7 +43,9 @@ export default function ChartTabs({ scenario, trendContext, marketBias, dataStat
           role="tab"
           aria-selected={activeTab === "trendlines"}
         >
-          {t("tabs.trendlines")} ({activeTrendlines.length})
+          <span className="chart-tab-icon" aria-hidden="true">TL</span>
+          <span>{t("tabs.trendlines")}</span>
+          <span className="trend-count">{activeTrendlines.length}</span>
         </button>
       </div>
 

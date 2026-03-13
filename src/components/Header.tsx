@@ -28,7 +28,10 @@ export default function Header({
   return (
     <div className="header">
       <div className="header-logo">SC</div>
-      <div className="header-title">{t("header.title")}</div>
+      <div className="header-brand">
+        <div className="header-title">{t("header.title")}</div>
+        <div className="header-subtitle">{symbol} | LIVE TERMINAL</div>
+      </div>
       <div className="header-controls">
         <select
           className="select-pill"

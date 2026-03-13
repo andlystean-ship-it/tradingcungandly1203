@@ -1,3 +1,4 @@
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { NewsItem, Symbol } from "../types";
 
@@ -8,6 +9,7 @@ type Props = {
 
 export default function NewsPanel({ news, symbol }: Props) {
   const { t } = useTranslation();
+  const [activeFilter, setActiveFilter] = useState<"all" | "live" | "fallback" | "bullish" | "bearish">("all");
   const coinName = symbol.split("/")[0];
   const hasLiveFeed = news.some((item) => item.sourceMode === "live");
   const hasFallbackFeed = news.some((item) => item.sourceMode === "fallback");
@@ -17,16 +19,56 @@ export default function NewsPanel({ news, symbol }: Props) {
       ? t("news.liveFeed")
       : t("news.fallbackFeed");
 
+  const visibleNews = useMemo(() => {
+    if (activeFilter === "all") return news;
+    if (activeFilter === "live") return news.filter((item) => item.sourceMode === "live");
+    if (activeFilter === "fallback") return news.filter((item) => item.sourceMode === "fallback");
+    return news.filter((item) => item.sentimentLabel === activeFilter);
+  }, [activeFilter, news]);
+
   return (
     <div className="news-panel" role="region" aria-label={t("news.title")}>
       <div className="news-header">
-        <div className="news-title">{t("news.title")} — {coinName}</div>
-        <div className="news-badge">{feedLabel}</div>
-        <div className="news-badge">{t("news.count", { count: news.length })}</div>
+        <div className="news-title-wrap">
+          <div className="news-title">{t("news.title")} | {coinName}</div>
+          <div className="news-subtitle">{feedLabel}</div>
+        </div>
+        <div className="news-badge">{t("news.count", { count: visibleNews.length })}</div>
+      </div>
+
+      <div className="news-filters" role="tablist" aria-label="News filters">
+        <button
+          className={`news-filter ${activeFilter === "all" ? "active" : ""}`}
+          onClick={() => setActiveFilter("all")}
+          type="button"
+        >
+          All
+        </button>
+        <button
+          className={`news-filter ${activeFilter === "live" ? "active" : ""}`}
+          onClick={() => setActiveFilter("live")}
+          type="button"
+        >
+          Live
+        </button>
+        <button
+          className={`news-filter ${activeFilter === "bullish" ? "active" : ""}`}
+          onClick={() => setActiveFilter("bullish")}
+          type="button"
+        >
+          Bullish
+        </button>
+        <button
+          className={`news-filter ${activeFilter === "bearish" ? "active" : ""}`}
+          onClick={() => setActiveFilter("bearish")}
+          type="button"
+        >
+          Bearish
+        </button>
       </div>
 
       <div className="news-list">
-        {news.map((item) => (
+        {visibleNews.map((item) => (
           <div key={item.id} className="news-card">
             <div className="news-meta">
               <span className="news-source">{item.source}</span>
@@ -47,13 +89,14 @@ export default function NewsPanel({ news, symbol }: Props) {
                 ))}
               </div>
 
-              <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+              <div className="news-actions">
                 <div className={`news-sentiment ${item.sentimentLabel}`}>
                   {t(`news.${item.sentimentLabel}`)} ({item.sentimentScore}%)
                 </div>
                 {item.sourceMode !== "fallback" && item.hasTargetPrice && (
                   <button className="news-cta">{t("news.hasTarget")}</button>
                 )}
+                <button className="news-cta ghost" type="button">Details</button>
               </div>
             </div>
             {item.sourceMode === "fallback" && (
